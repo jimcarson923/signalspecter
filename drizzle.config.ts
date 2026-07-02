@@ -1,11 +1,10 @@
-[phases.setup]
-nixPkgs = ["nodejs_20"]
+import { defineConfig } from "drizzle-kit";
 
-[phases.install]
-cmds = ["npm install"]
-
-[phases.build]
-cmds = ["npm run build"]
-
-[start]
-cmd = "node dist/index.cjs"
+export default defineConfig({
+  out: "./migrations",
+  schema: "./shared/schema.ts",
+  dialect: "sqlite",
+  dbCredentials: {
+    url: "./data.db",
+  },
+});
