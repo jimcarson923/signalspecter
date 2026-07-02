@@ -14,8 +14,11 @@ COPY . .
 # Build the app
 RUN npm run build
 
-# Expose port
+# Railway injects PORT env var — expose it
 EXPOSE 5000
+
+ENV PORT=5000
+ENV NODE_ENV=production
 
 # Start the app
 CMD ["node", "dist/index.cjs"]
