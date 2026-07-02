@@ -4,10 +4,10 @@ import { rm, readFile } from "node:fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
+// NOTE: better-sqlite3 is a native module (.node binary) and CANNOT be bundled
 const allowlist = [
   "@google/generative-ai",
   "axios",
-  "better-sqlite3",
   "cors",
   "date-fns",
   "drizzle-orm",
