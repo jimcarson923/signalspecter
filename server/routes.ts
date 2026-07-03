@@ -587,121 +587,102 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
   });
 
 
-  // ── Phase 2: Market Intelligence ───────────────────────────────────────────
+  // ── Phase 2: Market Intelligence ─────────────────────────────────────────
 
-  // In-memory store for yesterday's picks (keyed by date string)
+  // In-memory snapshots keyed by userId
   const dailySnapshots: Record<number, { date: string; tickers: string[] }> = {};
 
-  // Market intel: fetch news via Polygon, detect sentiment, return briefing
+  // Market intel — public endpoint, no auth required
   app.get('/api/specter/market-intel', async (req, res) => {
+    const today = new Date().toISOString().split('T')[0];
+
+    // Fetch news from Polygon (free tier supports this endpoint)
+    let headlines: { title: string; source: string; url: string; time: string }[] = [];
     try {
-      const OpenAI = (await import('openai')).default;
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-      // Fetch real market news from Polygon
-      const today = new Date().toISOString().split('T')[0];
-      const newsRes = await fetch(
-        `https://api.polygon.io/v2/reference/news?limit=10&order=desc&sort=published_utc&published_utc.gte=${today}&apiKey=${process.env.POLYGON_API_KEY}`
-      );
-      const newsData = await newsRes.json();
-      const articles = (newsData.results ?? []).slice(0, 8);
-
-      // Build headline list for AI
-      const headlines = articles.length > 0
-        ? articles.map((a: any) => `• ${a.title}`).join('
-')
-        : '• Markets open. No major breaking headlines yet today.';
-
-      // Sector sentiment — deterministic based on PRICE_CACHE movement simulation
-      const sectors = [
-        { name: 'Technology', score: Math.floor(55 + Math.random() * 40) },
-        { name: 'Energy',     score: Math.floor(40 + Math.random() * 50) },
-        { name: 'Finance',    score: Math.floor(45 + Math.random() * 45) },
-        { name: 'Healthcare', score: Math.floor(50 + Math.random() * 40) },
-        { name: 'EV/Auto',   score: Math.floor(35 + Math.random() * 55) },
-      ].map(s => ({ ...s, pressure: s.score >= 60 ? 'bullish' : s.score <= 45 ? 'bearish' : 'neutral' }));
-
-      // Ask GPT to build a spoken morning briefing
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [{
-          role: 'system',
-          content: 'You are Specter, an AI trading intelligence assistant. Deliver a sharp, spoken morning market briefing — like a financial news anchor in 3 sentences max. Be specific, confident, and brief.'
-        }, {
-          role: 'user',
-          content: `Today is ${today}. Here are the top market headlines:
-${headlines}
-
-Deliver a 3-sentence spoken market briefing. Start with "Here is your market intelligence for today."`
-        }],
-        max_tokens: 120
-      });
-
-      const briefingText = completion.choices[0].message.content ?? "Here is your market intelligence for today. Markets are open and active. Check your watchlist for key movers.";
-
-      res.json({
-        briefing: briefingText,
-        headlines: articles.map((a: any) => ({
-          title: a.title,
+      const newsUrl = `https://api.polygon.io/v2/reference/news?limit=8&order=desc&sort=published_utc&published_utc.gte=${today}&apiKey=${process.env.POLYGON_API_KEY}`;
+      const newsRes = await fetch(newsUrl);
+      if (newsRes.ok) {
+        const newsData = await newsRes.json() as { results?: any[] };
+        headlines = (newsData.results ?? []).slice(0, 8).map((a: any) => ({
+          title: a.title ?? '',
           source: a.publisher?.name ?? 'Market News',
           url: a.article_url ?? '#',
-          time: a.published_utc
-        })),
-        sectors
-      });
-    } catch (e) {
-      res.json({
-        briefing: "Here is your market intelligence for today. Markets are open. I was unable to pull live headlines at this moment — check back shortly.",
-        headlines: [],
-        sectors: [
-          { name: 'Technology', score: 72, pressure: 'bullish' },
-          { name: 'Energy',     score: 48, pressure: 'neutral' },
-          { name: 'Finance',    score: 61, pressure: 'bullish' },
-          { name: 'Healthcare', score: 44, pressure: 'neutral' },
-          { name: 'EV/Auto',   score: 38, pressure: 'bearish' },
-        ]
-      });
+          time: a.published_utc ?? ''
+        }));
+      }
+    } catch (_) {
+      // Polygon unavailable — continue with empty headlines
     }
+
+    // Sector pressure scores (simulated — real data in Phase 3)
+    const sectors = [
+      { name: 'Technology', score: Math.floor(55 + Math.random() * 40) },
+      { name: 'Energy',     score: Math.floor(40 + Math.random() * 50) },
+      { name: 'Finance',    score: Math.floor(45 + Math.random() * 45) },
+      { name: 'Healthcare', score: Math.floor(50 + Math.random() * 40) },
+      { name: 'EV/Auto',   score: Math.floor(35 + Math.random() * 55) },
+    ].map(s => ({
+      ...s,
+      pressure: s.score >= 60 ? 'bullish' : s.score <= 45 ? 'bearish' : 'neutral'
+    }));
+
+    // Build briefing text
+    let briefing = 'Here is your market intelligence for today. Markets are active across all sectors. Check your Specter parameters for personalized picks.';
+    try {
+      const openaiModule = await import('openai');
+      const OpenAI = openaiModule.default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const headlineText = headlines.length > 0
+        ? headlines.slice(0, 5).map(h => `- ${h.title}`).join('\n')
+        : 'No major headlines yet today.';
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are Specter, an AI trading assistant. Give a 2-3 sentence spoken market briefing. Start with: Here is your market intelligence for today.' },
+          { role: 'user', content: `Date: ${today}\nTop headlines:\n${headlineText}\nDeliver the briefing now.` }
+        ],
+        max_tokens: 100
+      });
+      briefing = completion.choices[0].message.content ?? briefing;
+    } catch (_) {
+      // OpenAI unavailable — use default briefing
+    }
+
+    res.json({ briefing, headlines, sectors });
   });
 
-  // Daily briefing: what changed since yesterday
+  // Daily delta — what changed since yesterday (requires auth)
   app.get('/api/specter/briefing', async (req, res) => {
     if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
 
-    const uid2 = req.session.userId as number;
-    const params = specterParams[uid2] ?? { minPrice: 0, maxPrice: 1000, minScore: 50, sector: 'All', minVolume: 0 };
+    const uid = req.session.userId as number;
+    const userParams = specterParams[uid] ?? { minPrice: 0, maxPrice: 1000, minScore: 50, sector: 'All', minVolume: 0 };
     const today = new Date().toISOString().split('T')[0];
 
-    // Get today's top picks
-    const allowed: string[] | null = (() => {
-      const SECTOR_MAP: Record<string, string[]> = {
-        'Tech':       ['NVDA','AMD','MSFT','AAPL','GOOG','META','AMZN','CRM','SNOW','PLTR','NET','TWLO','PATH','CLSK','MARA','RIOT'],
-        'Energy':     ['XOM','CVX','OXY','BP','VALE','SLB','HAL'],
-        'Finance':    ['BAC','JPM','GS','MS','C','WFC'],
-        'Healthcare': ['JNJ','PFE','MRNA','BNTX','ABBV','BMY','LLY'],
-        'EV/Auto':    ['TSLA','RIVN','LCID','NIO','XPEV','F','GM','JOBY'],
-        'All': []
-      };
-      return params.sector !== 'All' ? (SECTOR_MAP[params.sector] ?? []) : null;
-    })();
+    const SECTOR_MAP: Record<string, string[]> = {
+      'Tech':       ['NVDA','AMD','MSFT','AAPL','GOOG','META','AMZN','CRM','SNOW','PLTR','NET','TWLO','PATH','CLSK','MARA','RIOT'],
+      'Energy':     ['XOM','CVX','OXY','BP','VALE','SLB','HAL'],
+      'Finance':    ['BAC','JPM','GS','MS','C','WFC'],
+      'Healthcare': ['JNJ','PFE','MRNA','BNTX','ABBV','BMY','LLY'],
+      'EV/Auto':   ['TSLA','RIVN','LCID','NIO','XPEV','F','GM','JOBY'],
+      'All': []
+    };
+    const allowed: string[] | null = userParams.sector !== 'All' ? (SECTOR_MAP[userParams.sector] ?? []) : null;
 
     const todayPicks = PRICE_CACHE
-      .filter(s => s.price >= params.minPrice && s.price <= params.maxPrice && (allowed === null || allowed.includes(s.ticker)))
+      .filter(s => s.price >= userParams.minPrice && s.price <= userParams.maxPrice && (allowed === null || allowed.includes(s.ticker)))
       .map(s => ({ ...s, score: s.score ?? Math.floor(50 + Math.random() * 50) }))
-      .filter(s => s.score >= params.minScore)
+      .filter(s => s.score >= userParams.minScore)
       .sort((a, b) => b.score - a.score)
       .slice(0, 10)
       .map(s => s.ticker);
 
-    const uid = req.session.userId as number;
     const yesterday = dailySnapshots[uid];
-    
-    // Save today's snapshot
     dailySnapshots[uid] = { date: today, tickers: todayPicks };
 
     if (!yesterday) {
-      return res.json({ 
-        summary: "This is your first briefing — no yesterday to compare yet. Check back tomorrow for delta analysis.",
+      return res.json({
+        summary: 'This is your first Specter briefing. No yesterday data yet — check back tomorrow for delta analysis.',
         newEntries: todayPicks.slice(0, 3),
         dropped: [],
         unchanged: todayPicks
@@ -712,27 +693,26 @@ Deliver a 3-sentence spoken market briefing. Start with "Here is your market int
     const dropped = yesterday.tickers.filter(t => !todayPicks.includes(t));
     const unchanged = todayPicks.filter(t => yesterday.tickers.includes(t));
 
+    let summary = `Since yesterday, ${newEntries.length} stocks entered your radar${newEntries.length ? ': ' + newEntries.join(', ') : ''}. ${dropped.length} dropped off${dropped.length ? ': ' + dropped.join(', ') : ''}.`;
+
     try {
-      const OpenAI = (await import('openai')).default;
+      const openaiModule = await import('openai');
+      const OpenAI = openaiModule.default;
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [{
-          role: 'system',
-          content: 'You are Specter. Deliver a spoken 2-sentence delta summary comparing today vs yesterday top picks. Be direct and specific.'
-        }, {
-          role: 'user',
-          content: `New entries today: ${newEntries.join(', ') || 'none'}. Dropped since yesterday: ${dropped.join(', ') || 'none'}. Unchanged: ${unchanged.join(', ')}. Summarize what changed.`
-        }],
+        messages: [
+          { role: 'system', content: 'You are Specter. Give a 2-sentence spoken delta summary. Be direct.' },
+          { role: 'user', content: `New entries: ${newEntries.join(', ') || 'none'}. Dropped: ${dropped.join(', ') || 'none'}. Unchanged: ${unchanged.join(', ')}. Summarize.` }
+        ],
         max_tokens: 80
       });
-      res.json({ summary: completion.choices[0].message.content, newEntries, dropped, unchanged });
-    } catch {
-      res.json({
-        summary: `Since yesterday, ${newEntries.length} new stocks entered your radar${newEntries.length ? ': ' + newEntries.join(', ') : ''}. ${dropped.length} dropped off${dropped.length ? ': ' + dropped.join(', ') : ''}.`,
-        newEntries, dropped, unchanged
-      });
+      summary = completion.choices[0].message.content ?? summary;
+    } catch (_) {
+      // Use default summary
     }
+
+    res.json({ summary, newEntries, dropped, unchanged });
   });
 
   return httpServer;
