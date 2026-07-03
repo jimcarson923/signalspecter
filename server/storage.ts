@@ -1,12 +1,13 @@
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import {
-  users, watchlistItems, savedScans,
+  users, watchlistItems, savedScans, trades,
   type User, type InsertUser,
   type WatchlistItem, type InsertWatchlistItem,
   type SavedScan, type InsertSavedScan,
+  type Trade, type InsertTrade,
 } from '@shared/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
@@ -18,7 +19,7 @@ const DB_PATH = path.join(DB_DIR, 'data.db');
 const sqlite = new Database(DB_PATH);
 export const db = drizzle(sqlite);
 
-// Create tables
+// Run migrations inline — safe to call multiple times (CREATE TABLE IF NOT EXISTS)
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,9 +43,19 @@ sqlite.exec(`
     filters TEXT NOT NULL,
     created_at INTEGER
   );
+  CREATE TABLE IF NOT EXISTS trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    ticker TEXT NOT NULL,
+    action TEXT NOT NULL,
+    price REAL NOT NULL,
+    shares REAL NOT NULL DEFAULT 1,
+    sector TEXT,
+    notes TEXT,
+    traded_at INTEGER
+  );
 `);
 
-// Simple password hashing using built-in crypto (no bcrypt needed)
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
@@ -57,30 +68,15 @@ export function verifyPassword(password: string, stored: string): boolean {
   return hash === verify;
 }
 
-export interface IStorage {
-  // Auth
-  createUser(data: InsertUser): User;
-  getUserByEmail(email: string): User | undefined;
-  getUserById(id: number): User | undefined;
-  updateUserPlan(id: number, plan: string): User | undefined;
-  // Watchlist
-  getWatchlist(): WatchlistItem[];
-  addWatchlistItem(item: InsertWatchlistItem): WatchlistItem;
-  removeWatchlistItem(id: number): void;
-  // Scans
-  getSavedScans(): SavedScan[];
-  saveScan(scan: InsertSavedScan): SavedScan;
-  deleteScan(id: number): void;
-}
-
-export class Storage implements IStorage {
+class Storage {
+  // ── Users ──────────────────────────────────────────────────────────────────
   createUser(data: InsertUser): User {
     const passwordHash = hashPassword(data.password);
     return db.insert(users).values({
-      email: data.email,
-      name: data.name,
-      plan: data.plan ?? 'free',
+      email: data.email.toLowerCase(),
       passwordHash,
+      name: data.name,
+      plan: 'free',
       createdAt: new Date(),
     }).returning().get();
   }
@@ -97,6 +93,7 @@ export class Storage implements IStorage {
     return db.update(users).set({ plan }).where(eq(users.id, id)).returning().get();
   }
 
+  // ── Watchlist ──────────────────────────────────────────────────────────────
   getWatchlist(): WatchlistItem[] {
     return db.select().from(watchlistItems).all();
   }
@@ -109,6 +106,7 @@ export class Storage implements IStorage {
     db.delete(watchlistItems).where(eq(watchlistItems.id, id)).run();
   }
 
+  // ── Saved Scans ────────────────────────────────────────────────────────────
   getSavedScans(): SavedScan[] {
     return db.select().from(savedScans).all();
   }
@@ -119,6 +117,19 @@ export class Storage implements IStorage {
 
   deleteScan(id: number): void {
     db.delete(savedScans).where(eq(savedScans.id, id)).run();
+  }
+
+  // ── Trades ─────────────────────────────────────────────────────────────────
+  logTrade(trade: InsertTrade): Trade {
+    return db.insert(trades).values({ ...trade, tradedAt: new Date() }).returning().get();
+  }
+
+  getTradesByUser(userId: number): Trade[] {
+    return db.select().from(trades).where(eq(trades.userId, userId)).all();
+  }
+
+  deleteTrade(id: number, userId: number): void {
+    db.delete(trades).where(and(eq(trades.id, id), eq(trades.userId, userId))).run();
   }
 }
 
