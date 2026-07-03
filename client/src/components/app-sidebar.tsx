@@ -1,4 +1,5 @@
-import { Link, useLocation } from 'wouter';
+import { Link } from 'wouter';
+import { useHashLocation } from 'wouter/use-hash-location';
 import {
   LayoutDashboard, TrendingUp, TrendingDown, BookMarked,
   Brain, DollarSign, Bell, Settings, FileText, ChevronRight
@@ -6,8 +7,8 @@ import {
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard',       href: '/' },
-  { icon: TrendingUp,      label: 'Bullish Scanner', href: '/scanner/bullish' },
-  { icon: TrendingDown,    label: 'Bearish Scanner', href: '/scanner/bearish' },
+  { icon: TrendingUp,      label: 'Bullish Scanner', href: '/bullish' },
+  { icon: TrendingDown,    label: 'Bearish Scanner', href: '/bearish' },
   { icon: BookMarked,      label: 'Watchlist',       href: '/watchlist' },
   { icon: Brain,           label: 'AI Briefing',     href: '/briefing' },
   { icon: Bell,            label: 'Alerts',          href: '/alerts' },
@@ -17,7 +18,7 @@ const navItems = [
 ];
 
 export function AppSidebar() {
-  const [location] = useLocation();
+  const [location] = useHashLocation();
 
   return (
     <aside
@@ -28,7 +29,6 @@ export function AppSidebar() {
       {/* Brand */}
       <div className="px-4 py-5 border-b" style={{ borderColor: '#1a2332' }}>
         <div className="flex items-center gap-2 mb-1">
-          {/* Specter icon */}
           <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0"
             style={{ background: 'rgba(0,255,136,0.1)', border: '1px solid rgba(0,255,136,0.3)' }}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
@@ -89,8 +89,8 @@ export function AppSidebar() {
             J
           </div>
           <div>
-            <div className="text-xs font-medium text-white">Pro Plan</div>
-            <div className="text-xs" style={{ color: '#4a6080' }}>Specter AI Active</div>
+            <div className="text-xs font-medium text-white">Specter AI Active</div>
+            <div className="text-xs" style={{ color: '#4a6080' }}>signalspecter.com</div>
           </div>
           <div className="ml-auto">
             <div className="market-open-dot" />
