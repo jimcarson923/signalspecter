@@ -56,6 +56,7 @@ export interface IStorage {
   createUser(data: InsertUser): User;
   getUserByEmail(email: string): User | undefined;
   getUserById(id: number): User | undefined;
+  updateUserPlan(id: number, plan: string): User | undefined;
   // Watchlist
   getWatchlist(): WatchlistItem[];
   addWatchlistItem(item: InsertWatchlistItem): WatchlistItem;
@@ -84,6 +85,10 @@ export class Storage implements IStorage {
 
   getUserById(id: number): User | undefined {
     return db.select().from(users).where(eq(users.id, id)).get();
+  }
+
+  updateUserPlan(id: number, plan: string): User | undefined {
+    return db.update(users).set({ plan }).where(eq(users.id, id)).returning().get();
   }
 
   getWatchlist(): WatchlistItem[] {
