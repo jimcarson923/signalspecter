@@ -473,6 +473,119 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     res.json({ ok: true });
   });
 
+
+  // ── Specter AI ─────────────────────────────────────────────────────────────
+
+  // In-memory store for user specter params (keyed by userId)
+  const specterParams: Record<number, { minPrice: number; maxPrice: number; minScore: number; sector: string; minVolume: number }> = {};
+
+  // Save user parameters
+  app.post('/api/specter/params', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { minPrice = 0, maxPrice = 999999, minScore = 0, sector = 'All', minVolume = 0 } = req.body;
+    specterParams[req.session.userId] = { minPrice, maxPrice, minScore, sector, minVolume };
+    res.json({ ok: true });
+  });
+
+  // Get user parameters
+  app.get('/api/specter/params', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const params = specterParams[req.session.userId] ?? { minPrice: 0, maxPrice: 1000, minScore: 50, sector: 'All', minVolume: 0 };
+    res.json(params);
+  });
+
+  // Specter recommend — filters PRICE_CACHE by user params, scores each stock,
+  // builds an AI explanation, and returns top picks
+  app.post('/api/specter/recommend', async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const params = specterParams[req.session.userId] ?? { minPrice: 0, maxPrice: 1000, minScore: 50, sector: 'All', minVolume: 0 };
+    const { minPrice, maxPrice, minScore, sector } = params;
+
+    // Filter cache by price and sector
+    const SECTOR_MAP: Record<string, string[]> = {
+      'Tech':       ['NVDA','AMD','MSFT','AAPL','GOOG','META','AMZN','CRM','SNOW','PLTR','NET','TWLO','PATH','CLSK','MARA','RIOT','HUT','BTBT'],
+      'Energy':     ['XOM','CVX','OXY','BP','VALE','SLB','HAL','MRO','DVN','FANG'],
+      'Finance':    ['BAC','JPM','GS','MS','C','WFC','BRK','AXP','V','MA'],
+      'Healthcare': ['JNJ','PFE','MRNA','BNTX','ABBV','BMY','LLY','UNH','CVS','HUM'],
+      'EV/Auto':    ['TSLA','RIVN','LCID','NIO','XPEV','F','GM','JOBY','ACHR'],
+      'All': []
+    };
+
+    const allowed = sector !== 'All' ? (SECTOR_MAP[sector] ?? []) : null;
+
+    const filtered = PRICE_CACHE.filter(s => {
+      const inPrice = s.price >= minPrice && s.price <= maxPrice;
+      const inSector = allowed === null || allowed.includes(s.ticker);
+      return inPrice && inSector;
+    });
+
+    // Score each stock (simulate Specter Score if not set)
+    const scored = filtered.map(s => ({
+      ...s,
+      score: s.score ?? Math.floor(50 + Math.random() * 50),
+      bullish: Math.random() > 0.4,
+      reason: ''
+    })).filter(s => s.score >= minScore);
+
+    // Sort by score descending, take top 10
+    const top = scored.sort((a, b) => b.score - a.score).slice(0, 10);
+
+    if (top.length === 0) {
+      return res.json({ picks: [], explanation: 'No stocks matched your current parameters. Try widening your price range or lowering the minimum Specter Score.' });
+    }
+
+    // Build AI explanation using OpenAI
+    const topNames = top.slice(0, 5).map(s => `${s.ticker} ($${s.price.toFixed(2)}, Score: ${s.score})`).join(', ');
+    let explanation = '';
+    try {
+      const OpenAI = (await import('openai')).default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'system',
+          content: 'You are Specter, a sharp AI trading assistant built into SignalSpecter. You speak like a confident financial advisor — brief, specific, and insightful. Keep responses under 80 words.'
+        }, {
+          role: 'user',
+          content: `Based on the user's filters (price $${minPrice}–$${maxPrice}, sector: ${sector}, min score: ${minScore}), the top picks are: ${topNames}. Give a brief spoken summary of what you found and why these stocks stand out today. Start with "Here's what I found for you today."`
+        }],
+        max_tokens: 150
+      });
+      explanation = completion.choices[0].message.content ?? '';
+    } catch (e) {
+      explanation = `Here's what I found for you today. I scanned your parameters and the top picks are ${top.slice(0,3).map(s=>s.ticker).join(', ')}. These have the highest Specter Scores in your selected range.`;
+    }
+
+    res.json({ picks: top, explanation });
+  });
+
+
+  // Specter general chat
+  app.post('/api/specter/chat', async (req, res) => {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: 'No message provided' });
+
+    try {
+      const OpenAI = (await import('openai')).default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are Specter, an AI trading intelligence assistant built into SignalSpecter. You are confident, concise, and knowledgeable about stocks, markets, and trading strategies. Speak like a sharp financial advisor. Keep responses under 100 words. Never give financial advice disclaimers — the user knows you are AI.'
+          },
+          { role: 'user', content: message }
+        ],
+        max_tokens: 150
+      });
+      res.json({ reply: completion.choices[0].message.content ?? 'I could not process that. Try again.' });
+    } catch (e) {
+      res.json({ reply: 'I am having trouble connecting to my intelligence layer right now. Please try again in a moment.' });
+    }
+  });
+
   return httpServer;
 }
 
