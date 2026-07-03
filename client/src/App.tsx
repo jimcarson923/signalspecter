@@ -22,6 +22,7 @@ import PricingPage from '@/pages/pricing';
 import AlertsPage from '@/pages/alerts';
 import ReportsPage from '@/pages/reports';
 import SettingsPage from '@/pages/settings';
+import PriceRangeScannerPage from '@/pages/price-range-scanner';
 import NotFound from '@/pages/not-found';
 import LoginPage from '@/pages/login';
 import SignupPage from '@/pages/signup';
@@ -38,6 +39,7 @@ function AppRouter() {
       <Route path="/alerts" component={AlertsPage} />
       <Route path="/reports" component={ReportsPage} />
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/price-range" component={PriceRangeScannerPage} />
       <Route component={NotFound} />
     </Switch>
   );
