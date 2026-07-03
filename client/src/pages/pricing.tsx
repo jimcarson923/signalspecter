@@ -3,6 +3,9 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/useAuth';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Check,
   Zap,
@@ -17,6 +20,7 @@ import {
   Users,
   Infinity,
   Star,
+  Loader2,
 } from 'lucide-react';
 
 interface Tier {
@@ -154,8 +158,82 @@ function CheckCell({ value }: { value: boolean }) {
   );
 }
 
+// Map tier id → plan label shown in header
+const PLAN_LABELS: Record<string, string> = {
+  starter: 'Starter',
+  professional: 'Professional',
+  elite: 'Elite',
+  enterprise: 'Enterprise',
+};
+
 export default function PricingPage() {
   const [annual, setAnnual] = useState(true);
+  const [upgrading, setUpgrading] = useState<string | null>(null);
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const currentPlan = user?.plan ?? 'free';
+
+  async function handleUpgrade(tierId: string) {
+    if (tierId === 'enterprise') {
+      toast({
+        title: 'Contact Sales',
+        description: 'Email us at sales@signalspecter.com to set up your Enterprise plan.',
+      });
+      return;
+    }
+
+    if (!user) {
+      // Not logged in — send to signup
+      window.location.href = '/signup';
+      return;
+    }
+
+    if (currentPlan === tierId) {
+      toast({ title: 'Already on this plan', description: 'You are already on the ' + PLAN_LABELS[tierId] + ' plan.' });
+      return;
+    }
+
+    setUpgrading(tierId);
+    try {
+      const res = await fetch('/api/auth/upgrade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ plan: tierId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Upgrade failed');
+
+      // Refresh user data in React Query cache
+      await queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
+
+      toast({
+        title: '🎉 Plan upgraded!',
+        description: `You are now on the ${PLAN_LABELS[tierId]} plan.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: 'Upgrade failed',
+        description: err.message ?? 'Something went wrong. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpgrading(null);
+    }
+  }
+
+  function getCtaLabel(tier: Tier): string {
+    if (!user) return tier.id === 'enterprise' ? 'Contact Sales' : 'Get Started';
+    if (currentPlan === tier.id) return 'Current Plan';
+    if (tier.id === 'enterprise') return 'Contact Sales';
+    return tier.cta;
+  }
+
+  function isCurrentPlan(tierId: string): boolean {
+    return currentPlan === tierId;
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-10 max-w-7xl mx-auto">
@@ -170,6 +248,15 @@ export default function PricingPage() {
         <p className="text-sm text-muted-foreground max-w-md mx-auto leading-relaxed">
           Every plan includes a 14-day free trial. No credit card required to start.
         </p>
+
+        {/* Current plan badge */}
+        {user && (
+          <div className="inline-flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-full px-4 py-1.5">
+            <span className="text-xs text-primary font-medium">
+              Current plan: {PLAN_LABELS[currentPlan] ?? currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1)}
+            </span>
+          </div>
+        )}
 
         {/* Billing toggle */}
         <div className="inline-flex items-center gap-3 bg-card border border-border rounded-full px-4 py-2 mt-2">
@@ -197,90 +284,111 @@ export default function PricingPage() {
 
       {/* Tier cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {tiers.map((tier) => (
-          <Card
-            key={tier.id}
-            className={`relative flex flex-col transition-all ${
-              tier.popular
-                ? 'border-primary/50 shadow-lg shadow-primary/10 ring-1 ring-primary/20'
-                : `${tier.accentBorder}`
-            }`}
-            data-testid={`card-tier-${tier.id}`}
-          >
-            {tier.badge && (
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
-                <Badge
-                  className={`text-[10px] px-2.5 py-0.5 ${
-                    tier.popular
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+        {tiers.map((tier) => {
+          const isCurrent = isCurrentPlan(tier.id);
+          const isLoading = upgrading === tier.id;
+          return (
+            <Card
+              key={tier.id}
+              className={`relative flex flex-col transition-all ${
+                isCurrent
+                  ? 'border-emerald-500/50 shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-500/20'
+                  : tier.popular
+                  ? 'border-primary/50 shadow-lg shadow-primary/10 ring-1 ring-primary/20'
+                  : `${tier.accentBorder}`
+              }`}
+              data-testid={`card-tier-${tier.id}`}
+            >
+              {/* Badge row — current plan takes priority */}
+              {isCurrent ? (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
+                  <Badge className="text-[10px] px-2.5 py-0.5 bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
+                    <Check className="w-2.5 h-2.5 mr-1" /> Your Plan
+                  </Badge>
+                </div>
+              ) : tier.badge ? (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
+                  <Badge
+                    className={`text-[10px] px-2.5 py-0.5 ${
+                      tier.popular
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                    }`}
+                  >
+                    {tier.badge === 'Most Popular' && <Star className="w-2.5 h-2.5 mr-1" />}
+                    {tier.badge}
+                  </Badge>
+                </div>
+              ) : null}
+
+              <CardHeader className="pb-4 pt-6">
+                <div className={`w-9 h-9 rounded-lg ${tier.accentBg} border ${tier.accentBorder} flex items-center justify-center mb-3 ${tier.accent}`}>
+                  {tier.icon}
+                </div>
+                <h2 className="text-base font-bold">{tier.name}</h2>
+                <p className="text-xs text-muted-foreground leading-relaxed">{tier.tagline}</p>
+
+                {/* Price */}
+                <div className="pt-2">
+                  {tier.priceMonthly !== null ? (
+                    <div className="flex items-end gap-1">
+                      <span className="text-2xl font-bold tabular-nums text-foreground">
+                        ${annual ? tier.priceAnnual : tier.priceMonthly}
+                      </span>
+                      <span className="text-xs text-muted-foreground pb-1">/mo</span>
+                    </div>
+                  ) : (
+                    <div className="text-xl font-bold text-foreground">Custom</div>
+                  )}
+                  {tier.priceMonthly !== null && annual && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Billed annually · ${(tier.priceAnnual! * 12).toLocaleString()}/yr
+                    </p>
+                  )}
+                  {tier.priceMonthly !== null && !annual && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Billed monthly</p>
+                  )}
+                </div>
+              </CardHeader>
+
+              <CardContent className="flex flex-col flex-1 gap-4 pt-0">
+                <Button
+                  className={`w-full text-xs h-8 ${
+                    isCurrent
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 cursor-default'
+                      : tier.popular
+                      ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                      : ''
                   }`}
+                  variant={isCurrent ? 'ghost' : tier.popular ? 'default' : 'outline'}
+                  disabled={isCurrent || isLoading}
+                  onClick={() => handleUpgrade(tier.id)}
+                  data-testid={`button-cta-${tier.id}`}
                 >
-                  {tier.badge === 'Most Popular' && <Star className="w-2.5 h-2.5 mr-1" />}
-                  {tier.badge}
-                </Badge>
-              </div>
-            )}
+                  {isLoading ? (
+                    <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> Upgrading…</>
+                  ) : (
+                    getCtaLabel(tier)
+                  )}
+                </Button>
 
-            <CardHeader className="pb-4 pt-6">
-              <div className={`w-9 h-9 rounded-lg ${tier.accentBg} border ${tier.accentBorder} flex items-center justify-center mb-3 ${tier.accent}`}>
-                {tier.icon}
-              </div>
-              <h2 className="text-base font-bold">{tier.name}</h2>
-              <p className="text-xs text-muted-foreground leading-relaxed">{tier.tagline}</p>
+                <Separator className="opacity-30" />
 
-              {/* Price */}
-              <div className="pt-2">
-                {tier.priceMonthly !== null ? (
-                  <div className="flex items-end gap-1">
-                    <span className="text-2xl font-bold tabular-nums text-foreground">
-                      ${annual ? tier.priceAnnual : tier.priceMonthly}
-                    </span>
-                    <span className="text-xs text-muted-foreground pb-1">/mo</span>
-                  </div>
-                ) : (
-                  <div className="text-xl font-bold text-foreground">Custom</div>
-                )}
-                {tier.priceMonthly !== null && annual && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    Billed annually · ${(tier.priceAnnual! * 12).toLocaleString()}/yr
-                  </p>
-                )}
-                {tier.priceMonthly !== null && !annual && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Billed monthly</p>
-                )}
-              </div>
-            </CardHeader>
-
-            <CardContent className="flex flex-col flex-1 gap-4 pt-0">
-              <Button
-                className={`w-full text-xs h-8 ${
-                  tier.popular
-                    ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
-                    : 'variant-outline'
-                }`}
-                variant={tier.popular ? 'default' : 'outline'}
-                data-testid={`button-cta-${tier.id}`}
-              >
-                {tier.cta}
-              </Button>
-
-              <Separator className="opacity-30" />
-
-              <ul className="space-y-2 flex-1">
-                {tier.features.map((feature, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <Check className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${tier.accent}`} />
-                    <span className="text-xs text-muted-foreground leading-relaxed">{feature}</span>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        ))}
+                <ul className="space-y-2 flex-1">
+                  {tier.features.map((feature, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <Check className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${tier.accent}`} />
+                      <span className="text-xs text-muted-foreground leading-relaxed">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
-      {/* Specter AI AI callout */}
+      {/* Specter AI callout */}
       <Card className="border-primary/20 bg-gradient-to-r from-primary/5 via-transparent to-primary/5">
         <CardContent className="p-6">
           <div className="flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
@@ -288,9 +396,9 @@ export default function PricingPage() {
               <Brain className="w-6 h-6 text-primary" />
             </div>
             <div className="flex-1">
-              <h3 className="text-sm font-bold mb-1">Powered by Specter AI AI</h3>
+              <h3 className="text-sm font-bold mb-1">Powered by Specter AI</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Every plan is backed by our proprietary Specter AI AI engine — the same institutional-grade intelligence
+                Every plan is backed by our proprietary Specter AI engine — the same institutional-grade intelligence
                 used by professional traders, delivered in plain English so anyone can act on it.
               </p>
             </div>
