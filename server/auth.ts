@@ -94,4 +94,33 @@ export function registerAuthRoutes(app: Express) {
       plan: user.plan,
     });
   });
+
+  // Upgrade plan
+  app.post('/api/auth/upgrade', (req, res) => {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const schema = z.object({
+      plan: z.enum(['starter', 'professional', 'elite', 'enterprise']),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid plan' });
+    }
+    try {
+      const user = storage.updateUserPlan(req.session.userId, parsed.data.plan);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      return res.json({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        plan: user.plan,
+      });
+    } catch (err) {
+      console.error('Upgrade error:', err);
+      return res.status(500).json({ error: 'Failed to upgrade plan' });
+    }
+  });
 }
