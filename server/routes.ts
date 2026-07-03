@@ -145,33 +145,7 @@ const FALLBACK: Record<string, any> = {
   QQQ:   { symbol:'QQQ',   companyName:'Invesco QQQ Trust',      price:471.50, change:7.59,  changePercent:1.61,  volume:48300000, marketCap:0,    ghostScore:82, bullishPressure:78, bearishPressure:22, institutionalConf:88, forecastScore:81, sector:'ETF',        trend:'bullish' },
 };
 
-// ── Large ticker universe for price-range scanning ─────────────────────────────
-// A wide pool of real tickers across all price ranges — used by the price range scanner
-const PRICE_RANGE_UNIVERSE = [
-  // Large cap tech
-  'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','INTC','QCOM','TXN','AVGO','MU','AMAT',
-  // Mid cap tech
-  'CRM','SNOW','UBER','LYFT','RBLX','PINS','SNAP','TWLO','DDOG','ZS','NET','CRWD','OKTA','MDB',
-  // Finance
-  'JPM','BAC','GS','MS','WFC','C','BLK','SCHW','COIN','SOFI','AFRM','UPST','LC',
-  // Consumer
-  'AMZN','NFLX','ABNB','BKNG','EXPE','SHOP','ETSY','WISH','RVLV','PLBY',
-  // Healthcare
-  'UNH','JNJ','PFE','MRK','ABBV','BMY','LLY','MRNA','BNTX','NVAX','OCGN','SAVA',
-  // Energy
-  'XOM','CVX','OXY','SLB','HAL','DVN','FANG','MRO','APA','RIG',
-  // Small/penny-range tickers (common sub-$20 names)
-  'PLTR','SOFI','CLOV','WKHS','NKLA','RIDE','GOEV','SPCE','LCID','RIVN',
-  'OPEN','OFFERPAD','BARK','MAPS','ATVI','EA','TTWO','ZNGA',
-  // ETFs and indices
-  'SPY','QQQ','IWM','DIA','GLD','SLV','USO','TLT','HYG',
-  // More mid-range
-  'PYPL','SQ','HOOD','MARA','RIOT','HUT','BITF','CIFR',
-  'F','GM','STLA','NIO','XPEV','LI',
-  'AAL','UAL','DAL','LUV','SAVE','HA',
-  'AMC','GME','BBBY','EXPR','KOSS',
-  'SNDL','ACB','CGC','TLRY','CRON',
-];
+
 
 // ── AI Briefing ────────────────────────────────────────────────────────────────
 async function generateAIBriefing() {
@@ -265,7 +239,7 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     res.json(data);
   });
 
-  // Price range scanner — returns top opportunities within a price range
+  // Price range scanner — uses Polygon grouped daily bars to scan ALL ~12,000 US stocks
   // GET /api/scanner/price-range?min=10&max=15
   app.get('/api/scanner/price-range', async (req, res) => {
     const min = parseFloat(req.query.min as string);
@@ -276,23 +250,69 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     }
 
     try {
-      // Deduplicate the universe
-      const universe = [...new Set(PRICE_RANGE_UNIVERSE)];
-      // Fetch all in one Polygon snapshot batch (stays within rate limits via cache)
-      const allStocks = await fetchStocks(universe);
+      // Get yesterday's date (skip weekends)
+      const now = new Date();
+      let d = new Date(now);
+      d.setDate(d.getDate() - 1);
+      if (d.getDay() === 0) d.setDate(d.getDate() - 2); // Sunday → Friday
+      if (d.getDay() === 6) d.setDate(d.getDate() - 1); // Saturday → Friday
+      const dateStr = d.toISOString().split('T')[0];
 
-      // Filter to price range, remove any with price = 0 (Polygon returned nothing)
-      const inRange = allStocks.filter(s => s.price > 0 && s.price >= min && s.price <= max);
+      // Fetch grouped daily bars — returns all ~12,000 US stocks with previous close
+      const url = `${POLYGON_BASE}/v2/aggs/grouped/locale/us/market/stocks/${dateStr}?adjusted=true&apiKey=${POLYGON_API_KEY}`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Polygon grouped daily ${resp.status}`);
+      const data = await resp.json();
+      const bars: any[] = data.results ?? [];
 
-      // Sort by Specter Score descending — highest conviction opportunities first
-      inRange.sort((a, b) => b.ghostScore - a.ghostScore);
-
-      return res.json({
-        min,
-        max,
-        count: inRange.length,
-        results: inRange,
+      // Filter to price range, minimum volume 500k (liquid stocks only), exclude OTC weirdness
+      const inRange = bars.filter(b => {
+        const price = b.c ?? 0;
+        const vol = b.v ?? 0;
+        const sym = b.T ?? '';
+        return (
+          price >= min &&
+          price <= max &&
+          vol >= 500000 &&
+          /^[A-Z]{1,5}$/.test(sym) // real exchange tickers only (no warrants, units, etc.)
+        );
       });
+
+      // Sort by volume descending (most active = most liquid opportunities)
+      inRange.sort((a, b) => (b.v ?? 0) - (a.v ?? 0));
+
+      // Take top 50 and build stock objects
+      const top50 = inRange.slice(0, 50).map((b, i) => {
+        const sym = b.T;
+        const price = parseFloat((b.c ?? 0).toFixed(2));
+        const open = b.o ?? price;
+        const change = parseFloat((price - open).toFixed(2));
+        const changePercent = open ? parseFloat(((change / open) * 100).toFixed(2)) : 0;
+        const volume = b.v ?? 0;
+        const volSpike = b.vw ? b.v / b.vw : 1;
+        const momentum = changePercent;
+        const ghostScore = Math.round(Math.min(99, Math.max(1,
+          50 + (momentum * 4) + Math.min(15, (volSpike - 1) * 0.001)
+        )));
+        const bullishPressure = Math.min(99, Math.max(1, ghostScore + Math.round(Math.random() * 6 - 3)));
+        return {
+          symbol: sym,
+          companyName: sym,
+          price,
+          change,
+          changePercent,
+          volume,
+          ghostScore,
+          bullishPressure,
+          bearishPressure: Math.min(99, Math.max(1, 100 - ghostScore + Math.round(Math.random() * 6 - 3))),
+          institutionalConf: Math.min(99, Math.max(1, ghostScore - 5 + Math.round(Math.random() * 10))),
+          forecastScore: Math.min(99, Math.max(1, ghostScore - 3 + Math.round(Math.random() * 8))),
+          sector: 'Market',
+          trend: ghostScore > 65 ? 'bullish' : ghostScore < 40 ? 'bearish' : 'neutral',
+        };
+      });
+
+      return res.json({ min, max, count: inRange.length, results: top50 });
     } catch (err) {
       console.error('Price range scanner error:', err);
       return res.status(500).json({ error: 'Failed to run price range scan.' });
@@ -378,3 +398,4 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
 
   return httpServer;
 }
+
