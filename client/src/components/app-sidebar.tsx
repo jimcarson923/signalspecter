@@ -1,22 +1,23 @@
 import {
   LayoutDashboard, TrendingUp, TrendingDown, BookMarked,
-  Brain, DollarSign, Bell, Settings, FileText, ChevronRight
+  Brain, DollarSign, Bell, Settings, FileText, ChevronRight,
+  SlidersHorizontal
 } from 'lucide-react';
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard',       href: '/' },
-  { icon: TrendingUp,      label: 'Bullish Scanner', href: '/bullish' },
-  { icon: TrendingDown,    label: 'Bearish Scanner', href: '/bearish' },
-  { icon: BookMarked,      label: 'Watchlist',       href: '/watchlist' },
-  { icon: Brain,           label: 'AI Briefing',     href: '/briefing' },
-  { icon: Bell,            label: 'Alerts',          href: '/alerts' },
-  { icon: FileText,        label: 'Reports',         href: '/reports' },
-  { icon: DollarSign,      label: 'Pricing',         href: '/pricing' },
-  { icon: Settings,        label: 'Settings',        href: '/settings' },
+  { icon: LayoutDashboard,   label: 'Dashboard',           href: '/' },
+  { icon: TrendingUp,        label: 'Bullish Scanner',     href: '/bullish' },
+  { icon: TrendingDown,      label: 'Bearish Scanner',     href: '/bearish' },
+  { icon: SlidersHorizontal, label: 'Price Range',         href: '/price-range' },
+  { icon: BookMarked,        label: 'Watchlist',           href: '/watchlist' },
+  { icon: Brain,             label: 'AI Briefing',         href: '/briefing' },
+  { icon: Bell,              label: 'Alerts',              href: '/alerts' },
+  { icon: FileText,          label: 'Reports',             href: '/reports' },
+  { icon: DollarSign,        label: 'Pricing',             href: '/pricing' },
+  { icon: Settings,          label: 'Settings',            href: '/settings' },
 ];
 
 export function AppSidebar() {
-  // Read the current hash path, e.g. "#/bullish" → "/bullish"
   const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') || '/' : '/';
 
   return (
