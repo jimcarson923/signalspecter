@@ -6,6 +6,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/app-sidebar';
+import { SpecterPanel } from '@/components/specter-panel';
 import { useState, useEffect } from 'react';
 import { Sun, Moon, Bell, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -134,11 +135,15 @@ function AppShell() {
               </Button>
             </div>
           </header>
-          <main className="flex-1 overflow-y-auto overscroll-contain">
-            <Router hook={useHashLocation}>
-              <AppRouter />
-            </Router>
-          </main>
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            <main className="flex-1 overflow-y-auto overscroll-contain">
+              <Router hook={useHashLocation}>
+                <AppRouter />
+              </Router>
+            </main>
+            {/* Specter AI Panel — always visible on the right */}
+            <SpecterPanel />
+          </div>
         </div>
       </div>
     </SidebarProvider>
