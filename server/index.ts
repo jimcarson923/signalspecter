@@ -13,6 +13,9 @@ import { createServer } from "node:http";
 const app = express();
 const httpServer = createServer(app);
 
+// Trust Railway's proxy so secure cookies work correctly over HTTPS
+app.set('trust proxy', 1);
+
 // Security headers
 app.use(helmet({ contentSecurityPolicy: false }));
 
@@ -31,7 +34,7 @@ const apiLimiter = rateLimit({
 app.use('/api/', apiLimiter);
 app.use('/api/briefing', briefingLimiter);
 
-// Session
+// Session — 7-day persistent cookie
 const MStore = MemoryStore(session);
 app.use(session({
   secret: process.env.SESSION_SECRET || 'signalspecter-secret-change-in-prod',
