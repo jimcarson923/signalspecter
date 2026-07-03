@@ -8,8 +8,14 @@ import {
 } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import crypto from 'crypto';
+import path from 'path';
+import fs from 'fs';
 
-const sqlite = new Database('data.db');
+// Use /data volume on Railway (persists across redeploys), fallback to project root locally
+const DB_DIR = fs.existsSync('/data') ? '/data' : '.';
+const DB_PATH = path.join(DB_DIR, 'data.db');
+
+const sqlite = new Database(DB_PATH);
 export const db = drizzle(sqlite);
 
 // Create tables
