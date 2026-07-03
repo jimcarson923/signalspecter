@@ -145,6 +145,34 @@ const FALLBACK: Record<string, any> = {
   QQQ:   { symbol:'QQQ',   companyName:'Invesco QQQ Trust',      price:471.50, change:7.59,  changePercent:1.61,  volume:48300000, marketCap:0,    ghostScore:82, bullishPressure:78, bearishPressure:22, institutionalConf:88, forecastScore:81, sector:'ETF',        trend:'bullish' },
 };
 
+// ── Large ticker universe for price-range scanning ─────────────────────────────
+// A wide pool of real tickers across all price ranges — used by the price range scanner
+const PRICE_RANGE_UNIVERSE = [
+  // Large cap tech
+  'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','INTC','QCOM','TXN','AVGO','MU','AMAT',
+  // Mid cap tech
+  'CRM','SNOW','UBER','LYFT','RBLX','PINS','SNAP','TWLO','DDOG','ZS','NET','CRWD','OKTA','MDB',
+  // Finance
+  'JPM','BAC','GS','MS','WFC','C','BLK','SCHW','COIN','SOFI','AFRM','UPST','LC',
+  // Consumer
+  'AMZN','NFLX','ABNB','BKNG','EXPE','SHOP','ETSY','WISH','RVLV','PLBY',
+  // Healthcare
+  'UNH','JNJ','PFE','MRK','ABBV','BMY','LLY','MRNA','BNTX','NVAX','OCGN','SAVA',
+  // Energy
+  'XOM','CVX','OXY','SLB','HAL','DVN','FANG','MRO','APA','RIG',
+  // Small/penny-range tickers (common sub-$20 names)
+  'PLTR','SOFI','CLOV','WKHS','NKLA','RIDE','GOEV','SPCE','LCID','RIVN',
+  'OPEN','OFFERPAD','BARK','MAPS','ATVI','EA','TTWO','ZNGA',
+  // ETFs and indices
+  'SPY','QQQ','IWM','DIA','GLD','SLV','USO','TLT','HYG',
+  // More mid-range
+  'PYPL','SQ','HOOD','MARA','RIOT','HUT','BITF','CIFR',
+  'F','GM','STLA','NIO','XPEV','LI',
+  'AAL','UAL','DAL','LUV','SAVE','HA',
+  'AMC','GME','BBBY','EXPR','KOSS',
+  'SNDL','ACB','CGC','TLRY','CRON',
+];
+
 // ── AI Briefing ────────────────────────────────────────────────────────────────
 async function generateAIBriefing() {
   const now = new Date();
@@ -235,6 +263,40 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
       .filter(s => s.bearishPressure >= 35)
       .sort((a, b) => b.bearishPressure - a.bearishPressure);
     res.json(data);
+  });
+
+  // Price range scanner — returns top opportunities within a price range
+  // GET /api/scanner/price-range?min=10&max=15
+  app.get('/api/scanner/price-range', async (req, res) => {
+    const min = parseFloat(req.query.min as string);
+    const max = parseFloat(req.query.max as string);
+
+    if (isNaN(min) || isNaN(max) || min < 0 || max <= min || max > 100000) {
+      return res.status(400).json({ error: 'Provide valid min and max price values (min < max).' });
+    }
+
+    try {
+      // Deduplicate the universe
+      const universe = [...new Set(PRICE_RANGE_UNIVERSE)];
+      // Fetch all in one Polygon snapshot batch (stays within rate limits via cache)
+      const allStocks = await fetchStocks(universe);
+
+      // Filter to price range, remove any with price = 0 (Polygon returned nothing)
+      const inRange = allStocks.filter(s => s.price > 0 && s.price >= min && s.price <= max);
+
+      // Sort by Specter Score descending — highest conviction opportunities first
+      inRange.sort((a, b) => b.ghostScore - a.ghostScore);
+
+      return res.json({
+        min,
+        max,
+        count: inRange.length,
+        results: inRange,
+      });
+    } catch (err) {
+      console.error('Price range scanner error:', err);
+      return res.status(500).json({ error: 'Failed to run price range scan.' });
+    }
   });
 
   // AI Briefing
