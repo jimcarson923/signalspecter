@@ -1,5 +1,3 @@
-import { Link } from 'wouter';
-import { useHashLocation } from 'wouter/use-hash-location';
 import {
   LayoutDashboard, TrendingUp, TrendingDown, BookMarked,
   Brain, DollarSign, Bell, Settings, FileText, ChevronRight
@@ -18,7 +16,8 @@ const navItems = [
 ];
 
 export function AppSidebar() {
-  const [location] = useHashLocation();
+  // Read the current hash path, e.g. "#/bullish" → "/bullish"
+  const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') || '/' : '/';
 
   return (
     <aside
@@ -51,11 +50,15 @@ export function AppSidebar() {
       {/* Nav */}
       <nav className="flex-1 py-3 overflow-y-auto">
         {navItems.map(({ icon: Icon, label, href }) => {
-          const active = location === href || (href !== '/' && location.startsWith(href));
+          const active = hash === href || (href !== '/' && hash.startsWith(href));
           return (
-            <Link key={href} href={href}>
+            <a
+              key={href}
+              href={`#${href}`}
+              style={{ textDecoration: 'none' }}
+              data-testid={`nav-${label.toLowerCase().replace(/\s/g, '-')}`}
+            >
               <div
-                data-testid={`nav-${label.toLowerCase().replace(/\s/g, '-')}`}
                 className="flex items-center gap-3 px-4 py-2.5 mx-2 rounded cursor-pointer transition-all duration-150 group"
                 style={{
                   background: active ? 'rgba(0,255,136,0.08)' : 'transparent',
@@ -76,7 +79,7 @@ export function AppSidebar() {
                 </span>
                 {active && <ChevronRight size={12} style={{ color: '#00FF88', marginLeft: 'auto' }} />}
               </div>
-            </Link>
+            </a>
           );
         })}
       </nav>
