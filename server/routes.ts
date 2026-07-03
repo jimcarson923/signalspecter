@@ -239,80 +239,112 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     res.json(data);
   });
 
-  // Price range scanner — uses Polygon grouped daily bars to scan ALL ~12,000 US stocks
+  // Price range scanner
+  // Fetches prev-close for a curated universe, filters by price range
   // GET /api/scanner/price-range?min=10&max=15
   app.get('/api/scanner/price-range', async (req, res) => {
     const min = parseFloat(req.query.min as string);
     const max = parseFloat(req.query.max as string);
-
-    if (isNaN(min) || isNaN(max) || min < 0 || max <= min || max > 100000) {
-      return res.status(400).json({ error: 'Provide valid min and max price values (min < max).' });
+    if (isNaN(min) || isNaN(max) || min < 0 || max <= min) {
+      return res.status(400).json({ error: 'Provide valid min and max price values.' });
     }
 
+    // Curated universe of 120 liquid tickers spanning all price ranges
+    const UNIVERSE: Array<[string, string]> = [
+      // Sub $5
+      ['SNDL','Cannabis'], ['NKLA','EV'], ['GRAB','Tech'], ['PLUG','Energy'],
+      ['SPCE','Aerospace'], ['OCGN','Biotech'], ['NVAX','Biotech'], ['WKHS','EV'],
+      // $5–$20
+      ['F','Auto'], ['NOK','Telecom'], ['MARA','Crypto'], ['NIO','EV'], ['XPEV','EV'],
+      ['AAL','Airlines'], ['SOFI','Finance'], ['BB','Tech'], ['VALE','Mining'],
+      ['PATH','Tech'], ['CLSK','Crypto'], ['SMR','Energy'], ['SNAP','Social'],
+      ['T','Telecom'], ['WBD','Media'], ['PARA','Media'], ['JOBY','Aerospace'],
+      ['ACB','Cannabis'], ['CGC','Cannabis'], ['TLRY','Cannabis'], ['OPEN','Real Estate'],
+      ['FCEL','Energy'], ['BLNK','EV'], ['CHPT','EV'], ['AMC','Entertainment'],
+      ['HOOD','Finance'], ['DKNG','Gaming'], ['RIVN','EV'], ['LCID','EV'],
+      ['BAC','Finance'], ['WFC','Finance'], ['C','Finance'], ['USB','Finance'],
+      ['RF','Finance'], ['KEY','Finance'], ['FITB','Finance'], ['HBAN','Finance'],
+      ['VZ','Telecom'], ['DISH','Media'], ['INTC','Semiconductors'],
+      // $20–$60
+      ['PLTR','Tech'], ['GM','Auto'], ['STLA','Auto'], ['LI','EV'], ['RBLX','Gaming'],
+      ['AFRM','Fintech'], ['UPST','Fintech'], ['ALLY','Finance'],
+      ['OXY','Energy'], ['HAL','Energy'], ['DVN','Energy'], ['MRO','Energy'],
+      ['MGM','Gaming'], ['WYNN','Gaming'], ['CZR','Gaming'], ['PENN','Gaming'],
+      ['PYPL','Fintech'], ['TWLO','Tech'], ['ZS','Cybersecurity'], ['NET','Tech'],
+      ['MQ','Fintech'], ['LMND','Insurance'], ['CSCO','Tech'], ['EBAY','Commerce'],
+      ['SWN','Energy'], ['AR','Energy'], ['RRC','Energy'], ['APA','Energy'],
+      // $60–$150
+      ['COIN','Crypto'], ['UBER','Tech'], ['LYFT','Tech'], ['ABNB','Travel'],
+      ['DASH','Tech'], ['OKTA','Cybersecurity'], ['MDB','Tech'], ['DDOG','Tech'],
+      ['SNOW','Tech'], ['SHOP','Commerce'], ['ETSY','Commerce'], ['PINS','Social'],
+      ['AMD','Semiconductors'], ['QCOM','Semiconductors'], ['TXN','Semiconductors'],
+      ['MU','Semiconductors'], ['AMAT','Semiconductors'], ['MCHP','Semiconductors'],
+      ['GS','Finance'], ['MS','Finance'], ['BLK','Finance'], ['SCHW','Finance'],
+      ['JPM','Finance'], ['XOM','Energy'], ['CVX','Energy'], ['SLB','Energy'],
+      ['NFLX','Entertainment'], ['DIS','Entertainment'], ['SPOT','Entertainment'],
+      ['CRWD','Cybersecurity'], ['PANW','Cybersecurity'], ['FTNT','Cybersecurity'],
+      // $150+
+      ['MSFT','Tech'], ['GOOGL','Tech'], ['AMZN','Commerce'], ['TSLA','EV'],
+      ['NVDA','Semiconductors'], ['META','Social'], ['AAPL','Tech'], ['ADBE','Tech'],
+      ['ORCL','Tech'], ['IBM','Tech'], ['CRM','Tech'],
+      // ETFs
+      ['SPY','ETF'], ['QQQ','ETF'], ['IWM','ETF'], ['GLD','ETF'], ['TLT','ETF'],
+      ['XLF','ETF'], ['XLK','ETF'], ['XLE','ETF'], ['XLV','ETF'], ['SOXX','ETF'],
+      ['IWM','ETF'], ['HYG','ETF'], ['USO','ETF'], ['ARKK','ETF'],
+    ];
+
     try {
-      // Get yesterday's date (skip weekends)
-      const now = new Date();
-      let d = new Date(now);
-      d.setDate(d.getDate() - 1);
-      if (d.getDay() === 0) d.setDate(d.getDate() - 2); // Sunday → Friday
-      if (d.getDay() === 6) d.setDate(d.getDate() - 1); // Saturday → Friday
-      const dateStr = d.toISOString().split('T')[0];
+      const matched: any[] = [];
+      const BATCH_SIZE = 10;
 
-      // Fetch grouped daily bars — returns all ~12,000 US stocks with previous close
-      const url = `${POLYGON_BASE}/v2/aggs/grouped/locale/us/market/stocks/${dateStr}?adjusted=true&apiKey=${POLYGON_API_KEY}`;
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`Polygon grouped daily ${resp.status}`);
-      const data = await resp.json();
-      const bars: any[] = data.results ?? [];
+      for (let i = 0; i < UNIVERSE.length; i += BATCH_SIZE) {
+        const batch = UNIVERSE.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(async ([sym, sector]) => {
+          try {
+            const url = `${POLYGON_BASE}/v2/aggs/ticker/${sym}/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`;
+            const r = await fetch(url);
+            if (!r.ok) return;
+            const data = await r.json();
+            const bar = data.results?.[0];
+            if (!bar) return;
+            const price = parseFloat((bar.c ?? 0).toFixed(2));
+            if (price < min || price > max) return;
+            const open = bar.o ?? price;
+            const high = bar.h ?? price;
+            const low = bar.l ?? price;
+            const change = parseFloat((price - open).toFixed(2));
+            const changePercent = open ? parseFloat(((change / open) * 100).toFixed(2)) : 0;
+            const volume = bar.v ?? 0;
+            // Specter Score: momentum + range strength
+            const rangeStrength = high > low ? ((price - low) / (high - low)) * 20 : 10;
+            const ghostScore = Math.round(Math.min(99, Math.max(1,
+              50 + (changePercent * 4) + rangeStrength
+            )));
+            matched.push({
+              symbol: sym,
+              companyName: sym,
+              price,
+              change,
+              changePercent,
+              volume,
+              ghostScore,
+              bullishPressure: Math.min(99, Math.max(1, ghostScore + Math.round(Math.random() * 8 - 4))),
+              bearishPressure: Math.min(99, Math.max(1, 100 - ghostScore + Math.round(Math.random() * 8 - 4))),
+              institutionalConf: Math.min(99, Math.max(1, ghostScore - 5 + Math.round(Math.random() * 10))),
+              forecastScore: Math.min(99, Math.max(1, ghostScore - 3 + Math.round(Math.random() * 8))),
+              sector,
+              trend: ghostScore > 65 ? 'bullish' : ghostScore < 40 ? 'bearish' : 'neutral',
+            });
+          } catch { /* skip failed tickers silently */ }
+        }));
+        // Brief pause between batches to respect Polygon rate limits
+        if (i + BATCH_SIZE < UNIVERSE.length) {
+          await new Promise(r => setTimeout(r, 200));
+        }
+      }
 
-      // Filter to price range, minimum volume 500k (liquid stocks only), exclude OTC weirdness
-      const inRange = bars.filter(b => {
-        const price = b.c ?? 0;
-        const vol = b.v ?? 0;
-        const sym = b.T ?? '';
-        return (
-          price >= min &&
-          price <= max &&
-          vol >= 500000 &&
-          /^[A-Z]{1,5}$/.test(sym) // real exchange tickers only (no warrants, units, etc.)
-        );
-      });
-
-      // Sort by volume descending (most active = most liquid opportunities)
-      inRange.sort((a, b) => (b.v ?? 0) - (a.v ?? 0));
-
-      // Take top 50 and build stock objects
-      const top50 = inRange.slice(0, 50).map((b, i) => {
-        const sym = b.T;
-        const price = parseFloat((b.c ?? 0).toFixed(2));
-        const open = b.o ?? price;
-        const change = parseFloat((price - open).toFixed(2));
-        const changePercent = open ? parseFloat(((change / open) * 100).toFixed(2)) : 0;
-        const volume = b.v ?? 0;
-        const volSpike = b.vw ? b.v / b.vw : 1;
-        const momentum = changePercent;
-        const ghostScore = Math.round(Math.min(99, Math.max(1,
-          50 + (momentum * 4) + Math.min(15, (volSpike - 1) * 0.001)
-        )));
-        const bullishPressure = Math.min(99, Math.max(1, ghostScore + Math.round(Math.random() * 6 - 3)));
-        return {
-          symbol: sym,
-          companyName: sym,
-          price,
-          change,
-          changePercent,
-          volume,
-          ghostScore,
-          bullishPressure,
-          bearishPressure: Math.min(99, Math.max(1, 100 - ghostScore + Math.round(Math.random() * 6 - 3))),
-          institutionalConf: Math.min(99, Math.max(1, ghostScore - 5 + Math.round(Math.random() * 10))),
-          forecastScore: Math.min(99, Math.max(1, ghostScore - 3 + Math.round(Math.random() * 8))),
-          sector: 'Market',
-          trend: ghostScore > 65 ? 'bullish' : ghostScore < 40 ? 'bearish' : 'neutral',
-        };
-      });
-
-      return res.json({ min, max, count: inRange.length, results: top50 });
+      matched.sort((a, b) => b.ghostScore - a.ghostScore);
+      return res.json({ min, max, count: matched.length, results: matched });
     } catch (err) {
       console.error('Price range scanner error:', err);
       return res.status(500).json({ error: 'Failed to run price range scan.' });
@@ -398,4 +430,5 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
 
   return httpServer;
 }
+
 
