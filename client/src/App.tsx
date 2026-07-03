@@ -19,6 +19,9 @@ import BearishScannerPage from '@/pages/bearish-scanner';
 import WatchlistPage from '@/pages/watchlist';
 import BriefingPage from '@/pages/briefing';
 import PricingPage from '@/pages/pricing';
+import AlertsPage from '@/pages/alerts';
+import ReportsPage from '@/pages/reports';
+import SettingsPage from '@/pages/settings';
 import NotFound from '@/pages/not-found';
 import LoginPage from '@/pages/login';
 import SignupPage from '@/pages/signup';
@@ -32,6 +35,9 @@ function AppRouter() {
       <Route path="/watchlist" component={WatchlistPage} />
       <Route path="/briefing" component={BriefingPage} />
       <Route path="/pricing" component={PricingPage} />
+      <Route path="/alerts" component={AlertsPage} />
+      <Route path="/reports" component={ReportsPage} />
+      <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />
     </Switch>
   );
