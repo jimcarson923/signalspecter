@@ -715,6 +715,164 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     res.json({ summary, newEntries, dropped, unchanged });
   });
 
+
+  // ── Phase 3: Trade Memory & Style Learning ─────────────────────────────────
+
+  // Log a trade
+  app.post('/api/specter/trades', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { ticker, action, price, shares = 1, sector, notes } = req.body;
+    if (!ticker || !action || !price) return res.status(400).json({ error: 'ticker, action, and price are required' });
+    if (!['buy', 'sell'].includes(action)) return res.status(400).json({ error: 'action must be buy or sell' });
+    try {
+      const trade = storage.logTrade({
+        userId: req.session.userId as number,
+        ticker: ticker.toUpperCase(),
+        action,
+        price: parseFloat(price),
+        shares: parseFloat(shares),
+        sector: sector ?? null,
+        notes: notes ?? null,
+      });
+      res.status(201).json(trade);
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to log trade' });
+    }
+  });
+
+  // Get trade history for current user
+  app.get('/api/specter/trades', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const userTrades = storage.getTradesByUser(req.session.userId as number);
+    res.json(userTrades);
+  });
+
+  // Delete a trade
+  app.delete('/api/specter/trades/:id', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    storage.deleteTrade(parseInt(req.params.id), req.session.userId as number);
+    res.json({ ok: true });
+  });
+
+  // Specter style analysis — learns investing profile from trade history
+  app.get('/api/specter/style', async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const userTrades = storage.getTradesByUser(req.session.userId as number);
+
+    if (userTrades.length === 0) {
+      return res.json({
+        profile: 'New Trader',
+        summary: 'Log your first trade and Specter will start learning your investing style.',
+        traits: [],
+        avgBuyPrice: 0,
+        favoritesSectors: [],
+        totalTrades: 0,
+        pnl: 0
+      });
+    }
+
+    // Analyze trades
+    const buys = userTrades.filter(t => t.action === 'buy');
+    const sells = userTrades.filter(t => t.action === 'sell');
+    const avgBuyPrice = buys.length > 0
+      ? buys.reduce((sum, t) => sum + t.price, 0) / buys.length
+      : 0;
+
+    // Sector frequency
+    const sectorCount: Record<string, number> = {};
+    userTrades.forEach(t => {
+      if (t.sector) sectorCount[t.sector] = (sectorCount[t.sector] ?? 0) + 1;
+    });
+    const favoriteSectors = Object.entries(sectorCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([s]) => s);
+
+    // Ticker frequency
+    const tickerCount: Record<string, number> = {};
+    userTrades.forEach(t => { tickerCount[t.ticker] = (tickerCount[t.ticker] ?? 0) + 1; });
+    const favoriteTickers = Object.entries(tickerCount).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t]) => t);
+
+    // P&L calculation (match buys to sells by ticker)
+    let pnl = 0;
+    const buyMap: Record<string, { price: number; shares: number }[]> = {};
+    buys.forEach(t => {
+      if (!buyMap[t.ticker]) buyMap[t.ticker] = [];
+      buyMap[t.ticker].push({ price: t.price, shares: t.shares });
+    });
+    sells.forEach(t => {
+      const buyList = buyMap[t.ticker];
+      if (buyList && buyList.length > 0) {
+        const avgCost = buyList.reduce((s, b) => s + b.price, 0) / buyList.length;
+        pnl += (t.price - avgCost) * t.shares;
+      }
+    });
+
+    // Determine trading style traits
+    const traits: string[] = [];
+    if (avgBuyPrice < 15) traits.push('Penny & small-cap focused');
+    else if (avgBuyPrice < 50) traits.push('Mid-cap value hunter');
+    else traits.push('Blue-chip buyer');
+
+    if (buys.length > sells.length * 2) traits.push('Long-term accumulator');
+    else if (sells.length > buys.length) traits.push('Active swing trader');
+    else traits.push('Balanced trader');
+
+    if (favoriteSectors.includes('Tech')) traits.push('Tech-heavy portfolio');
+    if (favoriteSectors.includes('EV/Auto')) traits.push('EV sector enthusiast');
+    if (favoriteSectors.includes('Energy')) traits.push('Energy sector focus');
+
+    // Profile label
+    let profile = 'Balanced Trader';
+    if (avgBuyPrice < 10 && buys.length > 3) profile = 'Momentum Micro-Cap';
+    else if (avgBuyPrice > 100) profile = 'Blue-Chip Investor';
+    else if (favoriteSectors[0] === 'Tech') profile = 'Tech Growth Trader';
+    else if (sells.length > buys.length * 0.7) profile = 'Active Swing Trader';
+    else if (buys.length > sells.length * 3) profile = 'Long-Term Accumulator';
+
+    // AI summary
+    let summary = `You have ${userTrades.length} logged trades. Your average buy price is $${avgBuyPrice.toFixed(2)}. ${traits[0] ?? ''}.`;
+    try {
+      const openaiModule = await import('openai');
+      const OpenAI = openaiModule.default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are Specter. Write a 2-sentence first-person investor profile analysis based on trading data. Be specific and insightful. Do not use generic disclaimers.' },
+          { role: 'user', content: `Total trades: ${userTrades.length}. Buys: ${buys.length}, Sells: ${sells.length}. Avg buy price: $${avgBuyPrice.toFixed(2)}. Favorite tickers: ${favoriteTickers.join(', ')}. Favorite sectors: ${favoriteSectors.join(', ')}. Traits: ${traits.join(', ')}. P&L: $${pnl.toFixed(2)}. Write their investor profile.` }
+        ],
+        max_tokens: 80
+      });
+      summary = completion.choices[0].message.content ?? summary;
+    } catch (_) { /* use default */ }
+
+    res.json({ profile, summary, traits, avgBuyPrice, favoriteSectors, favoriteTickers, totalTrades: userTrades.length, pnl });
+  });
+
+  // P&L quick lookup
+  app.get('/api/specter/pnl', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const userTrades = storage.getTradesByUser(req.session.userId as number);
+    const buys = userTrades.filter(t => t.action === 'buy');
+    const sells = userTrades.filter(t => t.action === 'sell');
+    const buyMap: Record<string, { price: number; shares: number }[]> = {};
+    buys.forEach(t => {
+      if (!buyMap[t.ticker]) buyMap[t.ticker] = [];
+      buyMap[t.ticker].push({ price: t.price, shares: t.shares });
+    });
+    let pnl = 0;
+    sells.forEach(t => {
+      const buyList = buyMap[t.ticker];
+      if (buyList && buyList.length > 0) {
+        const avgCost = buyList.reduce((s, b) => s + b.price, 0) / buyList.length;
+        pnl += (t.price - avgCost) * t.shares;
+      }
+    });
+    res.json({ pnl, totalTrades: userTrades.length, buys: buys.length, sells: sells.length });
+  });
+
   return httpServer;
 }
 
