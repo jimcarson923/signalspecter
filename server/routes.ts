@@ -590,7 +590,7 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
   // ── Phase 2: Market Intelligence ───────────────────────────────────────────
 
   // In-memory store for yesterday's picks (keyed by date string)
-  const dailySnapshots: Record<string, { date: string; tickers: string[] }> = {};
+  const dailySnapshots: Record<number, { date: string; tickers: string[] }> = {};
 
   // Market intel: fetch news via Polygon, detect sentiment, return briefing
   app.get('/api/specter/market-intel', async (req, res) => {
@@ -668,7 +668,8 @@ Deliver a 3-sentence spoken market briefing. Start with "Here is your market int
   app.get('/api/specter/briefing', async (req, res) => {
     if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
 
-    const params = (specterParams as any)[req.session.userId] ?? { minPrice: 0, maxPrice: 1000, minScore: 50, sector: 'All' };
+    const uid2 = req.session.userId as number;
+    const params = specterParams[uid2] ?? { minPrice: 0, maxPrice: 1000, minScore: 50, sector: 'All', minVolume: 0 };
     const today = new Date().toISOString().split('T')[0];
 
     // Get today's top picks
@@ -692,10 +693,11 @@ Deliver a 3-sentence spoken market briefing. Start with "Here is your market int
       .slice(0, 10)
       .map(s => s.ticker);
 
-    const yesterday = dailySnapshots[req.session.userId ?? 0];
+    const uid = req.session.userId as number;
+    const yesterday = dailySnapshots[uid];
     
     // Save today's snapshot
-    dailySnapshots[req.session.userId ?? 0] = { date: today, tickers: todayPicks };
+    dailySnapshots[uid] = { date: today, tickers: todayPicks };
 
     if (!yesterday) {
       return res.json({ 
