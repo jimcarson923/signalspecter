@@ -487,8 +487,8 @@ export function SpecterPanel() {
                     </div>
                     <div className="bg-[#11161C] border border-zinc-800 rounded p-2 text-center">
                       <p className="text-[9px] text-zinc-500 uppercase">Realized P&L</p>
-                      <p className={`text-lg font-bold ${styleProfile.pnl >= 0 ? 'text-[#00FF88]' : 'text-red-400'}`}>
-                        {styleProfile.pnl >= 0 ? '+' : ''}${styleProfile.pnl.toFixed(2)}
+                      <p className={`text-lg font-bold ${styleProfile.pnl > 0 ? 'text-[#00FF88]' : styleProfile.pnl < 0 ? 'text-red-400' : 'text-zinc-500'}`}>
+                        {styleProfile.pnl === 0 ? '—' : `${styleProfile.pnl > 0 ? '+' : ''}$${styleProfile.pnl.toFixed(2)}`}
                       </p>
                     </div>
                     <div className="bg-[#11161C] border border-zinc-800 rounded p-2 text-center">
