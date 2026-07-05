@@ -32,7 +32,7 @@ function ScoreChip({ value, color }: { value: number; color: string }) {
       className="w-9 h-9 rounded flex items-center justify-center text-xs font-bold tabular"
       style={{ background: `${color}18`, color, border: `1px solid ${color}30` }}
     >
-      {value}
+      {Math.round(value)}
     </div>
   );
 }
