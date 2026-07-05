@@ -56,10 +56,43 @@ export function SpecterPanel() {
     if (muted || typeof window === 'undefined') return;
     window.speechSynthesis.cancel();
     const utt = new SpeechSynthesisUtterance(text);
-    utt.rate = 0.95; utt.pitch = 0.85; utt.volume = 1;
+    // Calm, intelligent voice: measured pace, lower pitch, full volume
+    utt.rate = 0.88;   // Slightly slower — deliberate, not rushed
+    utt.pitch = 0.78;  // Lower pitch — authoritative, calm
+    utt.volume = 1;
+
     const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v => v.name.includes('Google UK English Male') || v.name.includes('Daniel') || v.name.includes('Alex'));
-    if (preferred) utt.voice = preferred;
+
+    // Priority list: deepest, most natural voices across all platforms
+    const preferredNames = [
+      'Arthur',                   // PRIMARY: macOS Ventura+ — crisp, modern British male
+      'Daniel',                   // macOS/iOS fallback — smooth UK male
+      'Google UK English Male',   // Chrome fallback — deep British
+      'Aaron',                    // macOS — clear US male
+      'Alex',                     // macOS legacy — reliable US male
+      'Google US English',        // Chrome US fallback
+      'Microsoft Guy Online',     // Windows Edge
+      'Microsoft David',          // Windows offline
+      'en-GB',                    // Any British English voice
+    ];
+
+    // Find best available voice — prefer male, English, deep
+    let selected = null;
+    for (const name of preferredNames) {
+      const match = voices.find(v => v.name.includes(name) || v.lang.startsWith(name));
+      if (match) { selected = match; break; }
+    }
+
+    // Final fallback: pick any English male voice that isn't female-named
+    if (!selected) {
+      const femaleNames = ['Samantha', 'Victoria', 'Karen', 'Moira', 'Fiona', 'Tessa', 'Veena', 'Allison', 'Ava', 'Susan', 'Zoe', 'female'];
+      selected = voices.find(v =>
+        v.lang.startsWith('en') &&
+        !femaleNames.some(f => v.name.includes(f))
+      ) ?? null;
+    }
+
+    if (selected) utt.voice = selected;
     window.speechSynthesis.speak(utt);
   }, [muted]);
 
