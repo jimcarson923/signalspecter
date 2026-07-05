@@ -1044,6 +1044,36 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
   // Also check immediately on startup
   setTimeout(checkAlerts, 10000);
 
+
+  // ── Specter Voice: OpenAI TTS (onyx — Jarvis-style) ────────────────────────
+  app.post('/api/specter/speak', async (req, res) => {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: 'No text provided' });
+
+    try {
+      const openaiModule = await import('openai');
+      const OpenAI = openaiModule.default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+      const mp3 = await openai.audio.speech.create({
+        model: 'tts-1',
+        voice: 'onyx',       // Deep, authoritative — closest to Jarvis
+        input: text.slice(0, 4096),  // OpenAI TTS limit
+        speed: 0.95,         // Slightly measured pace
+      });
+
+      const buffer = Buffer.from(await mp3.arrayBuffer());
+      res.set({
+        'Content-Type': 'audio/mpeg',
+        'Content-Length': buffer.length,
+        'Cache-Control': 'no-cache',
+      });
+      res.send(buffer);
+    } catch (e) {
+      res.status(500).json({ error: 'TTS failed' });
+    }
+  });
+
   return httpServer;
 }
 
