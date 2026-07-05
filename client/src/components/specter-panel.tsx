@@ -50,50 +50,48 @@ export function SpecterPanel() {
   const [tradeSector, setTradeSector] = useState('');
   const [tradeSubmitting, setTradeSubmitting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<any>(null);
 
-  const speak = useCallback((text: string) => {
-    if (muted || typeof window === 'undefined') return;
-    window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(text);
-    // Calm, intelligent voice: measured pace, lower pitch, full volume
-    utt.rate = 0.88;   // Slightly slower — deliberate, not rushed
-    utt.pitch = 0.78;  // Lower pitch — authoritative, calm
-    utt.volume = 1;
+  const speak = useCallback(async (text: string) => {
+    if (muted) return;
 
-    const voices = window.speechSynthesis.getVoices();
-
-    // Priority list: deepest, most natural voices across all platforms
-    const preferredNames = [
-      'Arthur',                   // PRIMARY: macOS Ventura+ — crisp, modern British male
-      'Daniel',                   // macOS/iOS fallback — smooth UK male
-      'Google UK English Male',   // Chrome fallback — deep British
-      'Aaron',                    // macOS — clear US male
-      'Alex',                     // macOS legacy — reliable US male
-      'Google US English',        // Chrome US fallback
-      'Microsoft Guy Online',     // Windows Edge
-      'Microsoft David',          // Windows offline
-      'en-GB',                    // Any British English voice
-    ];
-
-    // Find best available voice — prefer male, English, deep
-    let selected = null;
-    for (const name of preferredNames) {
-      const match = voices.find(v => v.name.includes(name) || v.lang.startsWith(name));
-      if (match) { selected = match; break; }
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
     }
 
-    // Final fallback: pick any English male voice that isn't female-named
-    if (!selected) {
-      const femaleNames = ['Samantha', 'Victoria', 'Karen', 'Moira', 'Fiona', 'Tessa', 'Veena', 'Allison', 'Ava', 'Susan', 'Zoe', 'female'];
-      selected = voices.find(v =>
-        v.lang.startsWith('en') &&
-        !femaleNames.some(f => v.name.includes(f))
-      ) ?? null;
-    }
+    try {
+      // Use OpenAI onyx TTS — Jarvis-style deep authoritative voice
+      const res = await fetch('/api/specter/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ text }),
+      });
 
-    if (selected) utt.voice = selected;
-    window.speechSynthesis.speak(utt);
+      if (!res.ok) throw new Error('TTS failed');
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
+    } catch (_) {
+      // Fallback to browser TTS if OpenAI fails
+      if (typeof window === 'undefined') return;
+      window.speechSynthesis.cancel();
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.rate = 0.88; utt.pitch = 0.78; utt.volume = 1;
+      const voices = window.speechSynthesis.getVoices();
+      const preferred = voices.find(v =>
+        v.name.includes('Arthur') || v.name.includes('Daniel') || v.name.includes('Google UK English Male')
+      );
+      if (preferred) utt.voice = preferred;
+      window.speechSynthesis.speak(utt);
+    }
   }, [muted]);
 
   const fetchMarketIntel = useCallback(async () => {
