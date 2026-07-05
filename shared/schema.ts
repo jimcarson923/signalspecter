@@ -17,7 +17,7 @@ export const insertUserSchema = createInsertSchema(users).omit({ id: true, creat
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
-// Watchlist entries
+// Watchlist
 export const watchlistItems = sqliteTable('watchlist_items', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   symbol: text('symbol').notNull(),
@@ -29,7 +29,7 @@ export const insertWatchlistItemSchema = createInsertSchema(watchlistItems).omit
 export type InsertWatchlistItem = z.infer<typeof insertWatchlistItemSchema>;
 export type WatchlistItem = typeof watchlistItems.$inferSelect;
 
-// Saved scans / strategies
+// Saved scans
 export const savedScans = sqliteTable('saved_scans', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
@@ -41,12 +41,12 @@ export const insertSavedScanSchema = createInsertSchema(savedScans).omit({ id: t
 export type InsertSavedScan = z.infer<typeof insertSavedScanSchema>;
 export type SavedScan = typeof savedScans.$inferSelect;
 
-// Trade history — persisted per user for style learning
+// Trades
 export const trades = sqliteTable('trades', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: integer('user_id').notNull(),
   ticker: text('ticker').notNull(),
-  action: text('action').notNull(),       // 'buy' | 'sell'
+  action: text('action').notNull(),
   price: real('price').notNull(),
   shares: real('shares').notNull().default(1),
   sector: text('sector'),
@@ -56,3 +56,32 @@ export const trades = sqliteTable('trades', {
 export const insertTradeSchema = createInsertSchema(trades).omit({ id: true, tradedAt: true });
 export type InsertTrade = z.infer<typeof insertTradeSchema>;
 export type Trade = typeof trades.$inferSelect;
+
+// Price & Score Alerts
+export const alerts = sqliteTable('alerts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: integer('user_id').notNull(),
+  ticker: text('ticker').notNull(),
+  type: text('type').notNull(),        // 'price_above' | 'price_below' | 'score_above'
+  targetValue: real('target_value').notNull(),
+  message: text('message'),            // custom message shown in notification
+  triggered: integer('triggered', { mode: 'boolean' }).notNull().default(false),
+  triggeredAt: integer('triggered_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+export const insertAlertSchema = createInsertSchema(alerts).omit({ id: true, triggered: true, triggeredAt: true, createdAt: true });
+export type InsertAlert = z.infer<typeof insertAlertSchema>;
+export type Alert = typeof alerts.$inferSelect;
+
+// Push subscriptions (Web Push API)
+export const pushSubscriptions = sqliteTable('push_subscriptions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: integer('user_id').notNull(),
+  endpoint: text('endpoint').notNull().unique(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).omit({ id: true, createdAt: true });
+export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema>;
+export type PushSubscription = typeof pushSubscriptions.$inferSelect;
