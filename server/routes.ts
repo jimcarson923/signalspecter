@@ -873,6 +873,177 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     res.json({ pnl, totalTrades: userTrades.length, buys: buys.length, sells: sells.length });
   });
 
+
+  // ── Phase 5: Push Notifications & Price Alerts ────────────────────────────
+
+  // VAPID keys — generated once, stored in env. Use static fallback for demo.
+  // In production set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY in Railway env vars.
+  const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY ?? 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBB1YXRM7rvGEJ43PD1U';
+  const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY ?? 'UUxI4O8-FbRouAevSmBQ6o-kzGgivnw5BDanQxhEPMw';
+
+  // Return public VAPID key so client can subscribe
+  app.get('/api/push/vapid-public-key', (_req, res) => {
+    res.json({ key: VAPID_PUBLIC_KEY });
+  });
+
+  // Save push subscription
+  app.post('/api/push/subscribe', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { endpoint, p256dh, auth } = req.body;
+    if (!endpoint || !p256dh || !auth) return res.status(400).json({ error: 'Missing subscription fields' });
+    try {
+      const sub = storage.savePushSubscription({
+        userId: req.session.userId as number,
+        endpoint, p256dh, auth,
+      });
+      res.status(201).json({ ok: true, id: sub.id });
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to save subscription' });
+    }
+  });
+
+  // Unsubscribe
+  app.delete('/api/push/subscribe', (req, res) => {
+    const { endpoint } = req.body;
+    if (endpoint) storage.deletePushSubscription(endpoint);
+    res.json({ ok: true });
+  });
+
+  // Helper: send a push notification to a subscription
+  async function sendPush(sub: { endpoint: string; p256dh: string; auth: string }, title: string, body: string, url = '/') {
+    try {
+      const webpush = await import('web-push');
+      webpush.default.setVapidDetails(
+        'mailto:support@signalspecter.com',
+        VAPID_PUBLIC_KEY,
+        VAPID_PRIVATE_KEY
+      );
+      await webpush.default.sendNotification(
+        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+        JSON.stringify({ title, body, url })
+      );
+    } catch (e: any) {
+      // 410 = subscription expired, clean it up
+      if (e?.statusCode === 410) storage.deletePushSubscription(sub.endpoint);
+    }
+  }
+
+  // ── Price Alerts ──────────────────────────────────────────────────────────
+
+  // Create alert
+  app.post('/api/alerts', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { ticker, type, targetValue, message } = req.body;
+    if (!ticker || !type || targetValue == null) return res.status(400).json({ error: 'ticker, type, targetValue required' });
+    const validTypes = ['price_above', 'price_below', 'score_above'];
+    if (!validTypes.includes(type)) return res.status(400).json({ error: 'Invalid alert type' });
+    try {
+      const alert = storage.createAlert({
+        userId: req.session.userId as number,
+        ticker: ticker.toUpperCase(),
+        type, targetValue: parseFloat(targetValue),
+        message: message ?? null,
+      });
+      res.status(201).json(alert);
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to create alert' });
+    }
+  });
+
+  // Get all alerts for user
+  app.get('/api/alerts', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    res.json(storage.getAlertsByUser(req.session.userId as number));
+  });
+
+  // Delete alert
+  app.delete('/api/alerts/:id', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    storage.deleteAlert(parseInt(req.params.id), req.session.userId as number);
+    res.json({ ok: true });
+  });
+
+  // ── Alert Checker — runs every 5 minutes ─────────────────────────────────
+  async function checkAlerts() {
+    try {
+      const activeAlerts = storage.getActiveAlerts();
+      if (activeAlerts.length === 0) return;
+
+      // Get unique tickers
+      const tickers = [...new Set(activeAlerts.map(a => a.ticker))];
+
+      // Build price map from PRICE_CACHE (instant, no API calls)
+      const priceMap: Record<string, number> = {};
+      const scoreMap: Record<string, number> = {};
+      PRICE_CACHE.forEach(s => {
+        priceMap[s.ticker] = s.price;
+        scoreMap[s.ticker] = s.score ?? 0;
+      });
+
+      for (const alert of activeAlerts) {
+        const currentPrice = priceMap[alert.ticker];
+        const currentScore = scoreMap[alert.ticker];
+        if (currentPrice == null) continue;
+
+        let triggered = false;
+        let notifBody = '';
+
+        if (alert.type === 'price_above' && currentPrice >= alert.targetValue) {
+          triggered = true;
+          notifBody = `${alert.ticker} hit $${currentPrice.toFixed(2)} — above your $${alert.targetValue} target`;
+        } else if (alert.type === 'price_below' && currentPrice <= alert.targetValue) {
+          triggered = true;
+          notifBody = `${alert.ticker} dropped to $${currentPrice.toFixed(2)} — below your $${alert.targetValue} target`;
+        } else if (alert.type === 'score_above' && currentScore >= alert.targetValue) {
+          triggered = true;
+          notifBody = `${alert.ticker} Specter Score hit ${currentScore} — above your ${alert.targetValue} threshold`;
+        }
+
+        if (triggered) {
+          storage.markAlertTriggered(alert.id);
+          // Send push to all subscriptions for this user
+          const subs = storage.getPushSubscriptionsByUser(alert.userId);
+          for (const sub of subs) {
+            await sendPush(sub, `Specter Alert: ${alert.ticker}`, alert.message ?? notifBody, '/#/alerts');
+          }
+        }
+      }
+    } catch (_) {
+      // Silent — never crash the server
+    }
+  }
+
+  // Morning briefing push — 9am ET = 13:00 UTC
+  async function sendMorningBriefing() {
+    const now = new Date();
+    const utcHour = now.getUTCHours();
+    const utcMin = now.getUTCMinutes();
+    if (utcHour !== 13 || utcMin > 5) return; // Only fire 9:00–9:05 ET
+
+    try {
+      const allSubs = storage.getAllPushSubscriptions();
+      if (allSubs.length === 0) return;
+
+      // Get market intel briefing
+      const intelRes = await fetch(`http://localhost:${process.env.PORT ?? 8080}/api/specter/market-intel`);
+      const intel = intelRes.ok ? await intelRes.json() as { briefing?: string } : null;
+      const body = intel?.briefing ?? 'Good morning. Markets are open. Check your Specter dashboard for today\'s top picks.';
+
+      for (const sub of allSubs) {
+        await sendPush(sub, 'Specter Morning Briefing', body.slice(0, 120), '/#/');
+      }
+    } catch (_) { /* silent */ }
+  }
+
+  // Start interval — check every 5 minutes
+  setInterval(async () => {
+    await checkAlerts();
+    await sendMorningBriefing();
+  }, 5 * 60 * 1000);
+
+  // Also check immediately on startup
+  setTimeout(checkAlerts, 10000);
+
   return httpServer;
 }
 
