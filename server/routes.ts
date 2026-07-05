@@ -1051,26 +1051,38 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     if (!text) return res.status(400).json({ error: 'No text provided' });
 
     try {
-      const openaiModule = await import('openai');
-      const OpenAI = openaiModule.default;
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-      const mp3 = await openai.audio.speech.create({
-        model: 'tts-1',
-        voice: 'onyx',       // Deep, authoritative — closest to Jarvis
-        input: text.slice(0, 4096),  // OpenAI TTS limit
-        speed: 0.95,         // Slightly measured pace
+      // Direct REST call — avoids dynamic import issues
+      const response = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'tts-1',
+          voice: 'onyx',
+          input: text.slice(0, 4096),
+          speed: 0.95,
+        }),
       });
 
-      const buffer = Buffer.from(await mp3.arrayBuffer());
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('[Specter TTS] OpenAI error:', response.status, errText);
+        return res.status(500).json({ error: 'TTS failed', detail: errText.slice(0, 300) });
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
       res.set({
         'Content-Type': 'audio/mpeg',
         'Content-Length': buffer.length,
         'Cache-Control': 'no-cache',
       });
       res.send(buffer);
-    } catch (e) {
-      res.status(500).json({ error: 'TTS failed' });
+    } catch (e: any) {
+      console.error('[Specter TTS] Exception:', e?.message ?? e);
+      res.status(500).json({ error: 'TTS failed', detail: e?.message ?? 'Unknown error' });
     }
   });
 
