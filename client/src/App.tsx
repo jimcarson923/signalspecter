@@ -1,3 +1,4 @@
+// v1784484324 double-voice fix: conditional SpecterPanel mount
 import { Switch, Route, Router } from 'wouter';
 import { useHashLocation } from 'wouter/use-hash-location';
 import { QueryClientProvider } from '@tanstack/react-query';
