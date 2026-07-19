@@ -1045,13 +1045,59 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
   setTimeout(checkAlerts, 10000);
 
 
-  // ── Specter Voice: OpenAI TTS (onyx — Jarvis-style) ────────────────────────
+  // ── Specter Voice: ElevenLabs (Adam — Jarvis-style) ────────────────────────
+  // Adam voice ID on ElevenLabs: pNInz6obpgDQGcFmaJgB
   app.post('/api/specter/speak', async (req, res) => {
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: 'No text provided' });
 
+    const ELEVEN_API_KEY = process.env.ELEVENLABS_API_KEY;
+    const ADAM_VOICE_ID  = 'pNInz6obpgDQGcFmaJgB';
+
+    // Try ElevenLabs first (best quality — Jarvis feel)
+    if (ELEVEN_API_KEY) {
+      try {
+        const response = await fetch(
+          `https://api.elevenlabs.io/v1/text-to-speech/${ADAM_VOICE_ID}`,
+          {
+            method: 'POST',
+            headers: {
+              'xi-api-key': ELEVEN_API_KEY,
+              'Content-Type': 'application/json',
+              'Accept': 'audio/mpeg',
+            },
+            body: JSON.stringify({
+              text: text.slice(0, 5000),
+              model_id: 'eleven_multilingual_v2',
+              voice_settings: {
+                stability: 0.45,          // Slight variation — sounds alive, not robotic
+                similarity_boost: 0.85,   // Stay true to Adam's voice
+                style: 0.30,              // Expressive but controlled
+                use_speaker_boost: true,  // Richer, fuller sound
+              },
+            }),
+          }
+        );
+
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          res.set({
+            'Content-Type': 'audio/mpeg',
+            'Content-Length': buffer.length,
+            'Cache-Control': 'no-cache',
+          });
+          return res.send(buffer);
+        }
+        const errText = await response.text();
+        console.error('[Specter TTS] ElevenLabs error:', response.status, errText);
+      } catch (e: any) {
+        console.error('[Specter TTS] ElevenLabs exception:', e?.message);
+      }
+    }
+
+    // Fallback: OpenAI tts-1-hd onyx if ElevenLabs fails
     try {
-      // Direct REST call — avoids dynamic import issues
       const response = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
         headers: {
@@ -1068,7 +1114,6 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
 
       if (!response.ok) {
         const errText = await response.text();
-        console.error('[Specter TTS] OpenAI error:', response.status, errText);
         return res.status(500).json({ error: 'TTS failed', detail: errText.slice(0, 300) });
       }
 
@@ -1081,7 +1126,7 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
       });
       res.send(buffer);
     } catch (e: any) {
-      console.error('[Specter TTS] Exception:', e?.message ?? e);
+      console.error('[Specter TTS] Fallback exception:', e?.message);
       res.status(500).json({ error: 'TTS failed', detail: e?.message ?? 'Unknown error' });
     }
   });
