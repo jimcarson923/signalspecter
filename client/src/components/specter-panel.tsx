@@ -63,12 +63,17 @@ export function SpecterPanel() {
     }
 
     try {
-      // Use OpenAI onyx TTS — Jarvis-style deep authoritative voice
+      // Use ElevenLabs TTS — load voice preference from saved params
+      const savedParams = (() => {
+        try { return JSON.parse(localStorage.getItem('specterParams') || '{}'); } catch { return {}; }
+      })();
+      const voicePref = savedParams.voice || 'adam';
+
       const res = await fetch('/api/specter/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, voice: voicePref }),
       });
 
       if (!res.ok) throw new Error('TTS failed');
