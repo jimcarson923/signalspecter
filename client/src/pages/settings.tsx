@@ -10,35 +10,17 @@ import { useToast } from '@/hooks/use-toast';
 
 const SECTORS = ['All', 'Tech', 'Energy', 'Finance', 'Healthcare', 'EV/Auto'];
 
+const VOICES = [
+  { id: 'adam',   label: 'Adam',   gender: 'Male',   desc: 'Deep, calm, authoritative — Jarvis-style' },
+  { id: 'antoni', label: 'Antoni', gender: 'Male',   desc: 'Warm, confident, well-rounded' },
+  { id: 'rachel', label: 'Rachel', gender: 'Female', desc: 'Clear, calm, professional' },
+  { id: 'domi',   label: 'Domi',   gender: 'Female', desc: 'Strong, expressive, assertive' },
+];
+
 export default function SettingsPage() {
   const { toast } = useToast();
   const [saved, setSaved] = useState(false);
   const [previewing, setPreviewing] = useState<string | null>(null);
-
-  const previewVoice = async (voiceId: string) => {
-    if (previewing) return;
-    setPreviewing(voiceId);
-    try {
-      const res = await fetch('/api/specter/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          text: "Good morning. I am Specter, your AI trading intelligence. Markets are open and I have identified opportunities for you today.",
-          voice: voiceId,
-        }),
-      });
-      if (!res.ok) throw new Error('Preview failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.onended = () => { URL.revokeObjectURL(url); setPreviewing(null); };
-      audio.onerror = () => { setPreviewing(null); };
-      await audio.play();
-    } catch {
-      setPreviewing(null);
-    }
-  };
   const [params, setParams] = useState({
     minPrice: 0,
     maxPrice: 100,
@@ -48,13 +30,10 @@ export default function SettingsPage() {
     voice: 'adam',
   });
 
-  // Load existing params on mount
   useEffect(() => {
     fetch('/api/specter/params', { credentials: 'include' })
       .then(r => r.json())
-      .then(data => {
-        if (data && !data.error) setParams(data);
-      })
+      .then(data => { if (data && !data.error) setParams(p => ({ ...p, ...data })); })
       .catch(() => {});
   }, []);
 
@@ -67,7 +46,6 @@ export default function SettingsPage() {
         body: JSON.stringify(params),
       });
       if (res.ok) {
-        // Also persist to localStorage so specter-panel can read voice pref instantly
         localStorage.setItem('specterParams', JSON.stringify(params));
         setSaved(true);
         toast({ title: 'Specter parameters saved', description: 'Specter will use these filters when recommending stocks.' });
@@ -78,8 +56,34 @@ export default function SettingsPage() {
     }
   };
 
+  const previewVoice = async (voiceId: string) => {
+    if (previewing) return;
+    setPreviewing(voiceId);
+    try {
+      const res = await fetch('/api/specter/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          text: 'Good morning. I am Specter, your AI trading intelligence. Markets are open and I have identified high conviction opportunities for you today.',
+          voice: voiceId,
+        }),
+      });
+      if (!res.ok) throw new Error('Preview failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => { URL.revokeObjectURL(url); setPreviewing(null); };
+      audio.onerror = () => setPreviewing(null);
+      await audio.play();
+    } catch {
+      setPreviewing(null);
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
+
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-white flex items-center gap-2">
@@ -102,9 +106,7 @@ export default function SettingsPage() {
             <div className="flex-1 space-y-1">
               <Label className="text-xs text-zinc-400">Min Price ($)</Label>
               <Input
-                type="number"
-                min={0}
-                value={params.minPrice}
+                type="number" min={0} value={params.minPrice}
                 onChange={e => setParams(p => ({ ...p, minPrice: Number(e.target.value) }))}
                 className="bg-[#0B0F14] border-zinc-700 text-white text-sm h-9"
               />
@@ -113,16 +115,12 @@ export default function SettingsPage() {
             <div className="flex-1 space-y-1">
               <Label className="text-xs text-zinc-400">Max Price ($)</Label>
               <Input
-                type="number"
-                min={0}
-                value={params.maxPrice}
+                type="number" min={0} value={params.maxPrice}
                 onChange={e => setParams(p => ({ ...p, maxPrice: Number(e.target.value) }))}
                 className="bg-[#0B0F14] border-zinc-700 text-white text-sm h-9"
               />
             </div>
           </div>
-
-          {/* Quick presets */}
           <div className="flex flex-wrap gap-2">
             {[
               { label: 'Under $5', min: 0, max: 5 },
@@ -132,15 +130,13 @@ export default function SettingsPage() {
               { label: '$100–$500', min: 100, max: 500 },
               { label: 'Any price', min: 0, max: 999999 },
             ].map(preset => (
-              <button
-                key={preset.label}
+              <button key={preset.label}
                 onClick={() => setParams(p => ({ ...p, minPrice: preset.min, maxPrice: preset.max }))}
                 className={`text-xs px-3 py-1 rounded-full border transition-all ${
                   params.minPrice === preset.min && params.maxPrice === preset.max
                     ? 'border-[#00FF88] bg-[#00FF88]/10 text-[#00FF88]'
                     : 'border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white'
-                }`}
-              >
+                }`}>
                 {preset.label}
               </button>
             ))}
@@ -175,7 +171,7 @@ export default function SettingsPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-sm text-white">Minimum Specter Score</CardTitle>
           <CardDescription className="text-xs text-zinc-500">
-            Only show stocks with a Specter Score at or above this threshold. Higher = stricter filter.
+            Only show stocks at or above this threshold. Higher = stricter filter.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -185,9 +181,7 @@ export default function SettingsPage() {
             <span className="text-xs text-zinc-500">Aggressive (90+)</span>
           </div>
           <Slider
-            min={0}
-            max={95}
-            step={5}
+            min={0} max={95} step={5}
             value={[params.minScore]}
             onValueChange={([v]) => setParams(p => ({ ...p, minScore: v }))}
             className="[&_[role=slider]]:bg-[#00FF88] [&_[role=slider]]:border-[#00FF88]"
@@ -206,10 +200,7 @@ export default function SettingsPage() {
           <CardDescription className="text-xs text-zinc-500">Filter out illiquid stocks with low trading volume</CardDescription>
         </CardHeader>
         <CardContent>
-          <Select
-            value={String(params.minVolume)}
-            onValueChange={v => setParams(p => ({ ...p, minVolume: Number(v) }))}
-          >
+          <Select value={String(params.minVolume)} onValueChange={v => setParams(p => ({ ...p, minVolume: Number(v) }))}>
             <SelectTrigger className="bg-[#0B0F14] border-zinc-700 text-white text-sm h-9">
               <SelectValue />
             </SelectTrigger>
@@ -224,7 +215,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-
       {/* Specter Voice */}
       <Card className="bg-[#11161C] border-zinc-800">
         <CardHeader className="pb-3">
@@ -233,35 +223,29 @@ export default function SettingsPage() {
             Specter Voice
           </CardTitle>
           <CardDescription className="text-xs text-zinc-500">
-            Choose how Specter sounds when speaking to you
+            Choose how Specter sounds. Hit Preview to hear each voice before selecting.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent>
           <div className="grid grid-cols-2 gap-3">
-            {[
-              { id: 'adam',    label: 'Adam',    gender: 'Male',   desc: 'Deep, calm, authoritative — Jarvis-style' },
-              { id: 'antoni',  label: 'Antoni',  gender: 'Male',   desc: 'Warm, confident, well-rounded' },
-              { id: 'rachel',  label: 'Rachel',  gender: 'Female', desc: 'Clear, calm, professional' },
-              { id: 'domi',    label: 'Domi',    gender: 'Female', desc: 'Strong, expressive, assertive' },
-            ].map(v => (
+            {VOICES.map(v => (
               <div
                 key={v.id}
-                className={`text-left p-3 rounded border transition-all cursor-pointer ${
+                onClick={() => setParams(p => ({ ...p, voice: v.id }))}
+                className={`p-3 rounded border transition-all cursor-pointer ${
                   params.voice === v.id
                     ? 'border-[#00FF88] bg-[#00FF88]/10'
                     : 'border-zinc-700 hover:border-zinc-500'
                 }`}
-                onClick={() => setParams(p => ({ ...p, voice: v.id }))}
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className={`text-sm font-bold ${params.voice === v.id ? 'text-[#00FF88]' : 'text-white'}`}>
                     {v.label}
                   </span>
-                  <span className="text-xs px-1.5 py-0.5 rounded"
-                    style={{
-                      background: v.gender === 'Male' ? 'rgba(59,130,246,0.15)' : 'rgba(236,72,153,0.15)',
-                      color: v.gender === 'Male' ? '#3B82F6' : '#EC4899',
-                    }}>
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{
+                    background: v.gender === 'Male' ? 'rgba(59,130,246,0.15)' : 'rgba(236,72,153,0.15)',
+                    color: v.gender === 'Male' ? '#3B82F6' : '#EC4899',
+                  }}>
                     {v.gender}
                   </span>
                 </div>
@@ -269,16 +253,17 @@ export default function SettingsPage() {
                 <button
                   onClick={e => { e.stopPropagation(); previewVoice(v.id); }}
                   disabled={previewing !== null}
-                  className="flex items-center gap-1.5 text-xs px-2 py-1 rounded transition-all"
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded transition-all"
                   style={{
                     background: previewing === v.id ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.05)',
                     color: previewing === v.id ? '#00FF88' : '#8899aa',
-                    border: previewing === v.id ? '1px solid rgba(0,255,136,0.3)' : '1px solid rgba(255,255,255,0.08)',
+                    border: `1px solid ${previewing === v.id ? 'rgba(0,255,136,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                    cursor: previewing !== null ? 'not-allowed' : 'pointer',
                   }}
                 >
                   {previewing === v.id
-                    ? <><Loader2 size={11} className="animate-spin" /> Playing...</>
-                    : <><Play size={11} /> Preview</>
+                    ? <><Loader2 size={11} className="animate-spin" />&nbsp;Playing...</>
+                    : <><Play size={11} />&nbsp;Preview</>
                   }
                 </button>
               </div>
@@ -287,17 +272,17 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Save button */}
+      {/* Save */}
       <Button
         onClick={handleSave}
         className="w-full h-11 bg-[#00FF88] hover:bg-[#00FF88]/90 text-black font-bold text-sm transition-all"
       >
-        {saved ? (
-          <><CheckCircle2 className="h-4 w-4 mr-2" /> Parameters Saved</>
-        ) : (
-          <><Save className="h-4 w-4 mr-2" /> Save My Specter Parameters</>
-        )}
+        {saved
+          ? <><CheckCircle2 className="h-4 w-4 mr-2" /> Parameters Saved</>
+          : <><Save className="h-4 w-4 mr-2" /> Save My Specter Parameters</>
+        }
       </Button>
+
     </div>
   );
 }
