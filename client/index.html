@@ -36,6 +36,18 @@
         });
       }
     </script>
+  
+    <style>
+      @keyframes ticker-scroll {
+        0%   { transform: translateX(0); }
+        100% { transform: translateX(-50%); }
+      }
+      .ticker-scroll {
+        animation: ticker-scroll 40s linear infinite;
+        width: max-content;
+      }
+      .ticker-scroll:hover { animation-play-state: paused; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
