@@ -95,6 +95,63 @@ export default function SettingsPage() {
         </p>
       </div>
 
+      {/* Specter Voice */}
+      <Card className="bg-[#11161C] border-zinc-800">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm text-white flex items-center gap-2">
+            <Mic className="h-4 w-4 text-[#00FF88]" />
+            Specter Voice
+          </CardTitle>
+          <CardDescription className="text-xs text-zinc-500">
+            Choose how Specter sounds. Hit Preview to hear each voice before selecting.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-3">
+            {VOICES.map(v => (
+              <div
+                key={v.id}
+                onClick={() => setParams(p => ({ ...p, voice: v.id }))}
+                className={`p-3 rounded border transition-all cursor-pointer ${
+                  params.voice === v.id
+                    ? 'border-[#00FF88] bg-[#00FF88]/10'
+                    : 'border-zinc-700 hover:border-zinc-500'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className={`text-sm font-bold ${params.voice === v.id ? 'text-[#00FF88]' : 'text-white'}`}>
+                    {v.label}
+                  </span>
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{
+                    background: v.gender === 'Male' ? 'rgba(59,130,246,0.15)' : 'rgba(236,72,153,0.15)',
+                    color: v.gender === 'Male' ? '#3B82F6' : '#EC4899',
+                  }}>
+                    {v.gender}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-500 mb-2">{v.desc}</p>
+                <button
+                  onClick={e => { e.stopPropagation(); previewVoice(v.id); }}
+                  disabled={previewing !== null}
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded transition-all"
+                  style={{
+                    background: previewing === v.id ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.05)',
+                    color: previewing === v.id ? '#00FF88' : '#8899aa',
+                    border: `1px solid ${previewing === v.id ? 'rgba(0,255,136,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                    cursor: previewing !== null ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {previewing === v.id
+                    ? <><Loader2 size={11} className="animate-spin" />&nbsp;Playing...</>
+                    : <><Play size={11} />&nbsp;Preview</>
+                  }
+                </button>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Price Range */}
       <Card className="bg-[#11161C] border-zinc-800">
         <CardHeader className="pb-3">
@@ -215,62 +272,7 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Specter Voice */}
-      <Card className="bg-[#11161C] border-zinc-800">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm text-white flex items-center gap-2">
-            <Mic className="h-4 w-4 text-[#00FF88]" />
-            Specter Voice
-          </CardTitle>
-          <CardDescription className="text-xs text-zinc-500">
-            Choose how Specter sounds. Hit Preview to hear each voice before selecting.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-3">
-            {VOICES.map(v => (
-              <div
-                key={v.id}
-                onClick={() => setParams(p => ({ ...p, voice: v.id }))}
-                className={`p-3 rounded border transition-all cursor-pointer ${
-                  params.voice === v.id
-                    ? 'border-[#00FF88] bg-[#00FF88]/10'
-                    : 'border-zinc-700 hover:border-zinc-500'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className={`text-sm font-bold ${params.voice === v.id ? 'text-[#00FF88]' : 'text-white'}`}>
-                    {v.label}
-                  </span>
-                  <span className="text-xs px-1.5 py-0.5 rounded" style={{
-                    background: v.gender === 'Male' ? 'rgba(59,130,246,0.15)' : 'rgba(236,72,153,0.15)',
-                    color: v.gender === 'Male' ? '#3B82F6' : '#EC4899',
-                  }}>
-                    {v.gender}
-                  </span>
-                </div>
-                <p className="text-xs text-zinc-500 mb-2">{v.desc}</p>
-                <button
-                  onClick={e => { e.stopPropagation(); previewVoice(v.id); }}
-                  disabled={previewing !== null}
-                  className="flex items-center gap-1 text-xs px-2 py-1 rounded transition-all"
-                  style={{
-                    background: previewing === v.id ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.05)',
-                    color: previewing === v.id ? '#00FF88' : '#8899aa',
-                    border: `1px solid ${previewing === v.id ? 'rgba(0,255,136,0.3)' : 'rgba(255,255,255,0.08)'}`,
-                    cursor: previewing !== null ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {previewing === v.id
-                    ? <><Loader2 size={11} className="animate-spin" />&nbsp;Playing...</>
-                    : <><Play size={11} />&nbsp;Preview</>
-                  }
-                </button>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+
 
       {/* Save */}
       <Button
