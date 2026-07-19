@@ -7,10 +7,13 @@ WORKDIR /app
 
 COPY package*.json ./
 RUN npm install --build-from-source
+
 COPY . .
-RUN npm run build
+
+# Cache bust — forces rebuild of app layer
+ARG CACHE_BUST=1
+RUN echo "Building at $CACHE_BUST" && npm run build
 
 EXPOSE 5000
 
 CMD ["node", "dist/index.cjs"]
-
