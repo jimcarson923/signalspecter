@@ -1242,7 +1242,7 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
 
   async function checkWatchlistMoves() {
     const apiKey = process.env.POLYGON_API_KEY || 'wfPgfWPd_FNcmK8OmW0oGhWv_xz7CYNq';
-    const allItems = storage.getAllWatchlistSymbols();
+    const allItems = storage.getAllWatchlistItems();
     const uniqueSymbols = [...new Set(allItems.map((i: any) => i.symbol))];
 
     for (const symbol of uniqueSymbols) {
