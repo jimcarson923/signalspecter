@@ -17,13 +17,13 @@ export const insertUserSchema = createInsertSchema(users).omit({ id: true, creat
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
-// Watchlist
+// Watchlist (user-scoped — each user has their own list)
 export const watchlistItems = sqliteTable('watchlist_items', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  symbol: text('symbol').notNull(),
-  companyName: text('company_name').notNull(),
-  notes: text('notes'),
-  alertPrice: real('alert_price'),
+  id:       integer('id').primaryKey({ autoIncrement: true }),
+  userId:   integer('user_id').notNull(),
+  symbol:   text('symbol').notNull(),
+  addedAt:  integer('added_at').notNull(),
+  notes:    text('notes').default(''),
 });
 export const insertWatchlistItemSchema = createInsertSchema(watchlistItems).omit({ id: true });
 export type InsertWatchlistItem = z.infer<typeof insertWatchlistItemSchema>;
@@ -62,9 +62,9 @@ export const alerts = sqliteTable('alerts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: integer('user_id').notNull(),
   ticker: text('ticker').notNull(),
-  type: text('type').notNull(),        // 'price_above' | 'price_below' | 'score_above'
+  type: text('type').notNull(),
   targetValue: real('target_value').notNull(),
-  message: text('message'),            // custom message shown in notification
+  message: text('message'),
   triggered: integer('triggered', { mode: 'boolean' }).notNull().default(false),
   triggeredAt: integer('triggered_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
@@ -85,15 +85,3 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
 export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).omit({ id: true, createdAt: true });
 export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema>;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
-
-// ── Watchlist ────────────────────────────────────────────────────────────────
-export const watchlist = sqliteTable('watchlist', {
-  id:        integer('id').primaryKey({ autoIncrement: true }),
-  userId:    integer('user_id').notNull(),
-  symbol:    text('symbol').notNull(),
-  addedAt:   integer('added_at').notNull(),
-  notes:     text('notes').default(''),
-});
-
-export type WatchlistItem = typeof watchlist.$inferSelect;
-export type InsertWatchlistItem = typeof watchlist.$inferInsert;
