@@ -13,7 +13,7 @@ type PriceMap  = Record<string, PriceData>;
 function useLivePrices(): { prices: PriceMap; connected: boolean } {
   const [prices, setPrices] = useState<PriceMap>({});
   const [connected, setConnected] = useState(false);
-  const wsRef = useRef<InstanceType<typeof window.WebSocket> | null>(null);
+  const wsRef = useRef<any>(null);
 
   useEffect(() => {
     // Initial REST load so prices show instantly before WS connects
@@ -34,9 +34,9 @@ function useLivePrices(): { prices: PriceMap; connected: boolean } {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'price_update') {
-          setPrices(prev => ({ ...prev, ...msg.data }));
+          setPrices(prev => ({ ...prev, ...(msg.data as PriceMap) }));
         }
-      } catch (_) {}
+      } catch { }
     };
 
     return () => { ws.close(); };
@@ -48,7 +48,7 @@ function useLivePrices(): { prices: PriceMap; connected: boolean } {
 // ── Flash on price change ──────────────────────────────────────────────────
 function useFlash(value: number) {
   const [flash, setFlash] = useState<'up' | 'down' | null>(null);
-  const prev = useRef(value);
+  const prev = useRef<number>(value);
   useEffect(() => {
     if (value === prev.current) return;
     setFlash(value > prev.current ? 'up' : 'down');
