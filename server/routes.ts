@@ -1045,20 +1045,26 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
   setTimeout(checkAlerts, 10000);
 
 
-  // ── Specter Voice: ElevenLabs (Adam — Jarvis-style) ────────────────────────
-  // Adam voice ID on ElevenLabs: pNInz6obpgDQGcFmaJgB
+  // ── Specter Voice: ElevenLabs (user-selectable) ────────────────────────────
+  const ELEVEN_VOICES: Record<string, string> = {
+    adam:   'pNInz6obpgDQGcFmaJgB',  // Male   — deep, calm, Jarvis-style
+    antoni: 'ErXwobaYiN019PkySvjV',  // Male   — warm, confident
+    rachel: '21m00Tcm4TlvDq8ikWAM',  // Female — clear, professional
+    domi:   'AZnzlk1XvdvUeBnXmlld',  // Female — strong, expressive
+  };
+
   app.post('/api/specter/speak', async (req, res) => {
-    const { text } = req.body;
+    const { text, voice: voicePref } = req.body;
     if (!text) return res.status(400).json({ error: 'No text provided' });
 
     const ELEVEN_API_KEY = process.env.ELEVENLABS_API_KEY;
-    const ADAM_VOICE_ID  = 'pNInz6obpgDQGcFmaJgB';
+    const voiceId = ELEVEN_VOICES[voicePref as string] ?? ELEVEN_VOICES['adam'];
 
     // Try ElevenLabs first (best quality — Jarvis feel)
     if (ELEVEN_API_KEY) {
       try {
         const response = await fetch(
-          `https://api.elevenlabs.io/v1/text-to-speech/${ADAM_VOICE_ID}`,
+          `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
           {
             method: 'POST',
             headers: {
