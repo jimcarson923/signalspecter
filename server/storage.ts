@@ -169,6 +169,35 @@ class Storage {
   deletePushSubscription(endpoint: string): void {
     db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint)).run();
   }
+  // ── Watchlist ──────────────────────────────────────────────────────────────
+  getWatchlist(userId: number) {
+    return this.db
+      .prepare('SELECT * FROM watchlist WHERE user_id = ? ORDER BY added_at DESC')
+      .all(userId) as any[];
+  }
+
+  addToWatchlist(userId: number, symbol: string, notes = '') {
+    const existing = this.db
+      .prepare('SELECT id FROM watchlist WHERE user_id = ? AND symbol = ?')
+      .get(userId, symbol.toUpperCase());
+    if (existing) return existing;
+    return this.db
+      .prepare('INSERT INTO watchlist (user_id, symbol, added_at, notes) VALUES (?, ?, ?, ?)')
+      .run(userId, symbol.toUpperCase(), Date.now(), notes);
+  }
+
+  removeFromWatchlist(userId: number, symbol: string) {
+    return this.db
+      .prepare('DELETE FROM watchlist WHERE user_id = ? AND symbol = ?')
+      .run(userId, symbol.toUpperCase());
+  }
+
+  getAllWatchlistSymbols(): { userId: number; symbol: string }[] {
+    return this.db
+      .prepare('SELECT DISTINCT user_id as userId, symbol FROM watchlist')
+      .all() as any[];
+  }
+
 }
 
 export const storage = new Storage();
