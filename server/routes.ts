@@ -1058,7 +1058,7 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     if (!text) return res.status(400).json({ error: 'No text provided' });
 
     const ELEVEN_API_KEY = process.env.ELEVENLABS_API_KEY;
-    const voiceId = ELEVEN_VOICES[voicePref as string] ?? ELEVEN_VOICES['adam'];
+    const voiceId = ELEVEN_VOICES[voicePref as string] ?? ELEVEN_VOICES['antoni'];
 
     // Try ElevenLabs first (best quality — Jarvis feel)
     if (ELEVEN_API_KEY) {
@@ -1076,9 +1076,9 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
               text: text.slice(0, 5000),
               model_id: 'eleven_turbo_v2_5',
               voice_settings: {
-                stability: 0.30,          // More natural variation
-                similarity_boost: 0.90,   // Stay true to Adam's voice
-                style: 0.55,              // More expressive — Jarvis feel
+                stability: 0.25,          // Low stability = more natural, human variation
+                similarity_boost: 0.92,   // Strong voice fidelity
+                style: 0.65,              // High style = expressive, confident, Jarvis-like
                 use_speaker_boost: true,  // Richer, fuller sound
               },
             }),
