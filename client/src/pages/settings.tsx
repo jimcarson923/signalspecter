@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Sliders, CheckCircle2, Mic } from 'lucide-react';
+import { Save, Sliders, CheckCircle2, Mic, Play, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,6 +13,32 @@ const SECTORS = ['All', 'Tech', 'Energy', 'Finance', 'Healthcare', 'EV/Auto'];
 export default function SettingsPage() {
   const { toast } = useToast();
   const [saved, setSaved] = useState(false);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+
+  const previewVoice = async (voiceId: string) => {
+    if (previewing) return;
+    setPreviewing(voiceId);
+    try {
+      const res = await fetch('/api/specter/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          text: "Good morning. I am Specter, your AI trading intelligence. Markets are open and I have identified opportunities for you today.",
+          voice: voiceId,
+        }),
+      });
+      if (!res.ok) throw new Error('Preview failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => { URL.revokeObjectURL(url); setPreviewing(null); };
+      audio.onerror = () => { setPreviewing(null); };
+      await audio.play();
+    } catch {
+      setPreviewing(null);
+    }
+  };
   const [params, setParams] = useState({
     minPrice: 0,
     maxPrice: 100,
@@ -218,14 +244,14 @@ export default function SettingsPage() {
               { id: 'rachel',  label: 'Rachel',  gender: 'Female', desc: 'Clear, calm, professional' },
               { id: 'domi',    label: 'Domi',    gender: 'Female', desc: 'Strong, expressive, assertive' },
             ].map(v => (
-              <button
+              <div
                 key={v.id}
-                onClick={() => setParams(p => ({ ...p, voice: v.id }))}
-                className={`text-left p-3 rounded border transition-all ${
+                className={`text-left p-3 rounded border transition-all cursor-pointer ${
                   params.voice === v.id
                     ? 'border-[#00FF88] bg-[#00FF88]/10'
                     : 'border-zinc-700 hover:border-zinc-500'
                 }`}
+                onClick={() => setParams(p => ({ ...p, voice: v.id }))}
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className={`text-sm font-bold ${params.voice === v.id ? 'text-[#00FF88]' : 'text-white'}`}>
@@ -239,8 +265,23 @@ export default function SettingsPage() {
                     {v.gender}
                   </span>
                 </div>
-                <p className="text-xs text-zinc-500">{v.desc}</p>
-              </button>
+                <p className="text-xs text-zinc-500 mb-2">{v.desc}</p>
+                <button
+                  onClick={e => { e.stopPropagation(); previewVoice(v.id); }}
+                  disabled={previewing !== null}
+                  className="flex items-center gap-1.5 text-xs px-2 py-1 rounded transition-all"
+                  style={{
+                    background: previewing === v.id ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.05)',
+                    color: previewing === v.id ? '#00FF88' : '#8899aa',
+                    border: previewing === v.id ? '1px solid rgba(0,255,136,0.3)' : '1px solid rgba(255,255,255,0.08)',
+                  }}
+                >
+                  {previewing === v.id
+                    ? <><Loader2 size={11} className="animate-spin" /> Playing...</>
+                    : <><Play size={11} /> Preview</>
+                  }
+                </button>
+              </div>
             ))}
           </div>
         </CardContent>
