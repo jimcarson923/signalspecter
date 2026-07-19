@@ -154,7 +154,7 @@ function MobileSpecterDrawer({ open, onClose }: { open: boolean; onClose: () => 
         <div className="h-full rounded-t-2xl overflow-hidden border-t border-[#00FF88]/30 shadow-2xl">
           {/* Drag handle */}
           <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 bg-zinc-700 rounded-full z-10" />
-          <SpecterPanel />
+          {specterOpen && <SpecterPanel />}
         </div>
       </div>
     </>
