@@ -1059,10 +1059,10 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'tts-1',
+          model: 'tts-1-hd',
           voice: 'onyx',
           input: text.slice(0, 4096),
-          speed: 0.95,
+          speed: 0.90,
         }),
       });
 
