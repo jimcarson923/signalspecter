@@ -1074,11 +1074,11 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
             },
             body: JSON.stringify({
               text: text.slice(0, 5000),
-              model_id: 'eleven_multilingual_v2',
+              model_id: 'eleven_turbo_v2_5',
               voice_settings: {
-                stability: 0.45,          // Slight variation — sounds alive, not robotic
-                similarity_boost: 0.85,   // Stay true to Adam's voice
-                style: 0.30,              // Expressive but controlled
+                stability: 0.30,          // More natural variation
+                similarity_boost: 0.90,   // Stay true to Adam's voice
+                style: 0.55,              // More expressive — Jarvis feel
                 use_speaker_boost: true,  // Richer, fuller sound
               },
             }),
