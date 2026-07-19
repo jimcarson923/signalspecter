@@ -11,8 +11,8 @@ import { useToast } from '@/hooks/use-toast';
 const SECTORS = ['All', 'Tech', 'Energy', 'Finance', 'Healthcare', 'EV/Auto'];
 
 const VOICES = [
-  { id: 'adam',   label: 'Adam',   gender: 'Male',   desc: 'Deep, calm, authoritative — Jarvis-style' },
-  { id: 'antoni', label: 'Antoni', gender: 'Male',   desc: 'Warm, confident, well-rounded' },
+  { id: 'antoni', label: 'Antoni', gender: 'Male',   desc: 'Confident, expressive — closest to Jarvis' },
+  { id: 'adam',   label: 'Adam',   gender: 'Male',   desc: 'Deep, calm, authoritative' },
   { id: 'rachel', label: 'Rachel', gender: 'Female', desc: 'Clear, calm, professional' },
   { id: 'domi',   label: 'Domi',   gender: 'Female', desc: 'Strong, expressive, assertive' },
 ];
