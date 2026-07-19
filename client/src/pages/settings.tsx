@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Sliders, CheckCircle2 } from 'lucide-react';
+import { Save, Sliders, CheckCircle2, Mic } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,6 +19,7 @@ export default function SettingsPage() {
     minScore: 50,
     sector: 'All',
     minVolume: 0,
+    voice: 'adam',
   });
 
   // Load existing params on mount
@@ -40,6 +41,8 @@ export default function SettingsPage() {
         body: JSON.stringify(params),
       });
       if (res.ok) {
+        // Also persist to localStorage so specter-panel can read voice pref instantly
+        localStorage.setItem('specterParams', JSON.stringify(params));
         setSaved(true);
         toast({ title: 'Specter parameters saved', description: 'Specter will use these filters when recommending stocks.' });
         setTimeout(() => setSaved(false), 3000);
@@ -192,6 +195,54 @@ export default function SettingsPage() {
               <SelectItem value="5000000" className="text-zinc-200 focus:bg-[#00FF88]/10">5M+ shares/day</SelectItem>
             </SelectContent>
           </Select>
+        </CardContent>
+      </Card>
+
+
+      {/* Specter Voice */}
+      <Card className="bg-[#11161C] border-zinc-800">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm text-white flex items-center gap-2">
+            <Mic className="h-4 w-4 text-[#00FF88]" />
+            Specter Voice
+          </CardTitle>
+          <CardDescription className="text-xs text-zinc-500">
+            Choose how Specter sounds when speaking to you
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { id: 'adam',    label: 'Adam',    gender: 'Male',   desc: 'Deep, calm, authoritative — Jarvis-style' },
+              { id: 'antoni',  label: 'Antoni',  gender: 'Male',   desc: 'Warm, confident, well-rounded' },
+              { id: 'rachel',  label: 'Rachel',  gender: 'Female', desc: 'Clear, calm, professional' },
+              { id: 'domi',    label: 'Domi',    gender: 'Female', desc: 'Strong, expressive, assertive' },
+            ].map(v => (
+              <button
+                key={v.id}
+                onClick={() => setParams(p => ({ ...p, voice: v.id }))}
+                className={`text-left p-3 rounded border transition-all ${
+                  params.voice === v.id
+                    ? 'border-[#00FF88] bg-[#00FF88]/10'
+                    : 'border-zinc-700 hover:border-zinc-500'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className={`text-sm font-bold ${params.voice === v.id ? 'text-[#00FF88]' : 'text-white'}`}>
+                    {v.label}
+                  </span>
+                  <span className="text-xs px-1.5 py-0.5 rounded"
+                    style={{
+                      background: v.gender === 'Male' ? 'rgba(59,130,246,0.15)' : 'rgba(236,72,153,0.15)',
+                      color: v.gender === 'Male' ? '#3B82F6' : '#EC4899',
+                    }}>
+                    {v.gender}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-500">{v.desc}</p>
+              </button>
+            ))}
+          </div>
         </CardContent>
       </Card>
 
