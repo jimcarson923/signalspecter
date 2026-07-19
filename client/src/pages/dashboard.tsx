@@ -1,8 +1,106 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
-import { TrendingUp, TrendingDown, Activity, BarChart2, RefreshCw, Search } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { TrendingUp, TrendingDown, Activity, Search, Wifi } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import type { Stock } from '@shared/schema';
+
+// ── Live price hook via WebSocket ──────────────────────────────────────────
+type PriceData = { price: number; change: number; changePct: number; prev: number };
+type PriceMap  = Record<string, PriceData>;
+
+function useLivePrices(): { prices: PriceMap; connected: boolean } {
+  const [prices, setPrices] = useState<PriceMap>({});
+  const [connected, setConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    // Initial REST load so prices show instantly before WS connects
+    fetch('/api/prices/live')
+      .then(r => r.json())
+      .then(d => { if (d.prices) setPrices(d.prices); })
+      .catch(() => {});
+
+    // Connect WebSocket
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${window.location.host}/ws/prices`);
+    wsRef.current = ws;
+
+    ws.onopen  = () => setConnected(true);
+    ws.onclose = () => setConnected(false);
+    ws.onerror = () => setConnected(false);
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'price_update') {
+          setPrices(prev => ({ ...prev, ...msg.data }));
+        }
+      } catch (_) {}
+    };
+
+    return () => { ws.close(); };
+  }, []);
+
+  return { prices, connected };
+}
+
+// ── Flash on price change ──────────────────────────────────────────────────
+function useFlash(value: number) {
+  const [flash, setFlash] = useState<'up' | 'down' | null>(null);
+  const prev = useRef(value);
+  useEffect(() => {
+    if (value === prev.current) return;
+    setFlash(value > prev.current ? 'up' : 'down');
+    prev.current = value;
+    const t = setTimeout(() => setFlash(null), 800);
+    return () => clearTimeout(t);
+  }, [value]);
+  return flash;
+}
+
+// ── Live price cell (flashes green/red on change) ─────────────────────────
+function LivePrice({ ticker, prices }: { ticker: string; prices: PriceMap }) {
+  const data = prices[ticker];
+  const price = data?.price ?? 0;
+  const flash = useFlash(price);
+  const bg = flash === 'up' ? 'rgba(0,255,136,0.18)' : flash === 'down' ? 'rgba(255,68,68,0.18)' : 'transparent';
+  return (
+    <span
+      className="tabular font-bold transition-colors duration-300 rounded px-1"
+      style={{ color: '#fff', background: bg }}
+    >
+      {price > 0 ? `$${price.toFixed(2)}` : '—'}
+    </span>
+  );
+}
+
+// ── Scrolling ticker bar ───────────────────────────────────────────────────
+const TICKER_SYMBOLS = ['SPY','QQQ','NVDA','AAPL','MSFT','TSLA','AMZN','META','GOOGL','AMD','PLTR','COIN','MARA','SOFI','HOOD','MSTR'];
+
+function TickerBar({ prices }: { prices: PriceMap }) {
+  const items = [...TICKER_SYMBOLS, ...TICKER_SYMBOLS]; // doubled for seamless loop
+  return (
+    <div className="overflow-hidden flex-shrink-0" style={{ background: '#080C10', borderBottom: '1px solid #1a2332', height: 32 }}>
+      <div className="ticker-scroll flex items-center h-full gap-6 whitespace-nowrap">
+        {items.map((sym, i) => {
+          const d = prices[sym];
+          const up = (d?.changePct ?? 0) >= 0;
+          return (
+            <span key={`${sym}-${i}`} className="text-xs flex items-center gap-1.5">
+              <span className="font-bold" style={{ color: '#00FF88' }}>{sym}</span>
+              <span className="tabular" style={{ color: '#fff' }}>
+                {d?.price ? `$${d.price.toFixed(2)}` : '—'}
+              </span>
+              <span className="tabular text-xs" style={{ color: up ? '#00FF88' : '#FF4444' }}>
+                {d ? `${up ? '▲' : '▼'} ${Math.abs(d.changePct).toFixed(2)}%` : ''}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function ScoreBar({ score }: { score: number }) {
@@ -12,15 +110,14 @@ function ScoreBar({ score }: { score: number }) {
       <div className="flex-1 rounded-full h-1.5" style={{ background: '#1a2332' }}>
         <div className="h-1.5 rounded-full transition-all" style={{ width: `${score}%`, background: color }} />
       </div>
-      <span className="text-xs tabular font-bold w-6 text-right" style={{ color }}>{score}</span>
+      <span className="text-xs tabular font-bold w-6 text-right" style={{ color }}>{Math.round(score)}</span>
     </div>
   );
 }
 
 function PctChange({ value }: { value: number }) {
-  if (Math.abs(value) < 0.001) {
+  if (Math.abs(value) < 0.001)
     return <span className="text-xs tabular font-semibold" style={{ color: '#94a3b8' }}>— 0.00%</span>;
-  }
   const up = value > 0;
   return (
     <span className="text-xs tabular font-semibold" style={{ color: up ? '#00FF88' : '#FF4444' }}>
@@ -29,7 +126,6 @@ function PctChange({ value }: { value: number }) {
   );
 }
 
-// Fake intraday chart data
 const chartData = Array.from({ length: 28 }, (_, i) => ({
   t: `${Math.floor(9.5 + i * 0.25)}:${i % 4 === 0 ? '00' : i % 4 === 1 ? '15' : i % 4 === 2 ? '30' : '45'}`,
   v: 4050 + Math.sin(i * 0.4) * 60 + i * 5 + Math.random() * 20,
@@ -56,6 +152,8 @@ const recentAlerts = [
 ];
 
 export default function Dashboard() {
+  const { prices, connected } = useLivePrices();
+
   const { data: topStocks = [], isLoading: loadingTop } = useQuery<Stock[]>({
     queryKey: ['/api/market/top'],
     queryFn: () => apiRequest('GET', '/api/market/top').then(r => r.json()),
@@ -68,15 +166,31 @@ export default function Dashboard() {
     refetchInterval: 30000,
   });
 
-  // Sort by Specter Score descending so leader card always shows the true #1
   const sortedStocks = [...topStocks].sort((a, b) => b.ghostScore - a.ghostScore);
   const leader = sortedStocks[0];
+
+  // Merge live prices into top stocks table
+  const enrichedStocks = topStocks.slice(0, 10).map(s => ({
+    ...s,
+    price: prices[s.symbol]?.price ?? s.price,
+    changePercent: prices[s.symbol]?.changePct ?? s.changePercent,
+  }));
+
+  // Live SPY/QQQ/DIA from WS
+  const liveIndices = [
+    { sym: 'SPY', name: 'S&P 500 ETF' },
+    { sym: 'DIA', name: 'DJIA ETF' },
+    { sym: 'QQQ', name: 'NASDAQ ETF' },
+  ];
 
   return (
     <div className="flex flex-col h-full min-h-0" style={{ background: '#0B0F14' }}>
 
-      {/* ── Search bar ─────────────────────────────────────────────── */}
-      <div className="flex items-center px-5 py-3 border-b flex-shrink-0"
+      {/* ── Live ticker bar ──────────────────────────────────────────── */}
+      <TickerBar prices={prices} />
+
+      {/* ── Search + connection status ───────────────────────────────── */}
+      <div className="flex items-center justify-between px-5 py-2 border-b flex-shrink-0"
         style={{ background: '#080C10', borderColor: '#1a2332' }}>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded"
           style={{ background: '#11161C', border: '1px solid #1a2332' }}>
@@ -85,15 +199,18 @@ export default function Dashboard() {
             placeholder="Search symbol..."
             className="bg-transparent outline-none text-sm w-40"
             style={{ color: '#8899aa' }}
-            data-testid="input-symbol-search"
           />
+        </div>
+        <div className="flex items-center gap-1.5 text-xs"
+          style={{ color: connected ? '#00FF88' : '#4a6080' }}>
+          <Wifi size={12} />
+          <span>{connected ? 'LIVE' : 'CONNECTING...'}</span>
         </div>
       </div>
 
-      {/* ── KPI bar ────────────────────────────────────────────────────── */}
+      {/* ── KPI bar ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-5 gap-3 px-5 py-3 flex-shrink-0" style={{ borderBottom: '1px solid #1a2332' }}>
-        {/* Specter Score Leader */}
-        <div className="kpi-card" data-testid="kpi-score-leader">
+        <div className="kpi-card">
           <div className="text-xs mb-1" style={{ color: '#4a6080' }}>SPECTER SCORE LEADER</div>
           {loadingTop ? (
             <div className="skeleton h-8 w-24 mb-1" />
@@ -102,57 +219,59 @@ export default function Dashboard() {
               <span className="text-2xl font-black" style={{ color: '#00FF88', textShadow: '0 0 12px rgba(0,255,136,0.4)' }}>
                 {leader?.symbol ?? 'NVDA'}
               </span>
-              <span className="text-2xl font-black text-white mb-0.5">{leader?.ghostScore ?? 96}</span>
+              <span className="text-2xl font-black text-white mb-0.5">{leader ? Math.round(leader.ghostScore) : 96}</span>
             </div>
           )}
           <div className="text-xs" style={{ color: '#4a6080' }}>{leader?.companyName ?? 'NVIDIA Corporation'}</div>
-          <PctChange value={leader?.changePercent ?? 4.21} />
+          <PctChange value={prices[leader?.symbol ?? 'NVDA']?.changePct ?? leader?.changePercent ?? 4.21} />
         </div>
 
-        {/* Market Health */}
-        <div className="kpi-card" data-testid="kpi-market-health">
+        <div className="kpi-card">
           <div className="text-xs mb-1" style={{ color: '#4a6080' }}>MARKET HEALTH</div>
           <div className="text-xl font-black mb-1" style={{ color: '#00FF88' }}>BULLISH</div>
           <div className="text-2xl font-black text-white">{overview?.spyChange ? '72%' : '68%'}</div>
-          <div className="text-xs" style={{ color: '#4a6080' }}>▲ {overview?.spyChange ?? 0.42}% vs yesterday</div>
+          <div className="text-xs" style={{ color: '#4a6080' }}>▲ {prices['SPY']?.changePct?.toFixed(2) ?? overview?.spyChange ?? '0.42'}% vs yesterday</div>
         </div>
 
-        {/* Opportunities */}
-        <div className="kpi-card" data-testid="kpi-opportunities">
+        <div className="kpi-card">
           <div className="text-xs mb-1" style={{ color: '#4a6080' }}>OPPORTUNITIES TODAY</div>
           <div className="text-3xl font-black text-white">28</div>
           <div className="text-xs mt-1" style={{ color: '#4a6080' }}>High conviction setups</div>
         </div>
 
-        {/* Scan Results */}
-        <div className="kpi-card" data-testid="kpi-scan-results">
+        <div className="kpi-card">
           <div className="text-xs mb-1" style={{ color: '#4a6080' }}>SCAN RESULTS</div>
           <div className="text-3xl font-black text-white">8,642</div>
           <div className="text-xs mt-1" style={{ color: '#4a6080' }}>Stocks analyzed</div>
         </div>
 
-        {/* Alerts */}
-        <div className="kpi-card" data-testid="kpi-alerts">
+        <div className="kpi-card">
           <div className="text-xs mb-1" style={{ color: '#4a6080' }}>ACTIVE ALERTS</div>
           <div className="text-3xl font-black" style={{ color: '#3B82F6' }}>7</div>
           <div className="text-xs mt-1" style={{ color: '#4a6080' }}>Active alerts</div>
         </div>
       </div>
 
-      {/* ── Main content ────────────────────────────────────────────────── */}
+      {/* ── Main content ─────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
 
-        {/* Row 1: Top Opportunities table + Market Overview chart */}
+        {/* Row 1: Top Opportunities + Market Overview */}
         <div className="grid grid-cols-5 gap-4">
-
-          {/* Top Opportunities Table */}
           <div className="col-span-3 rounded" style={{ background: '#11161C', border: '1px solid #1a2332' }}>
             <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#1a2332' }}>
               <span className="text-sm font-bold text-white uppercase tracking-wide">Top Opportunities</span>
-              <button className="text-xs px-3 py-1 rounded" style={{ background: 'rgba(0,255,136,0.08)', color: '#00FF88', border: '1px solid rgba(0,255,136,0.2)' }}
-                data-testid="button-view-all-opportunities">
-                VIEW ALL OPPORTUNITIES
-              </button>
+              <div className="flex items-center gap-2">
+                {connected && (
+                  <span className="text-xs px-2 py-0.5 rounded animate-pulse"
+                    style={{ background: 'rgba(0,255,136,0.08)', color: '#00FF88', border: '1px solid rgba(0,255,136,0.2)' }}>
+                    ● LIVE
+                  </span>
+                )}
+                <button className="text-xs px-3 py-1 rounded"
+                  style={{ background: 'rgba(0,255,136,0.08)', color: '#00FF88', border: '1px solid rgba(0,255,136,0.2)' }}>
+                  VIEW ALL
+                </button>
+              </div>
             </div>
             <table className="w-full text-xs">
               <thead>
@@ -171,13 +290,13 @@ export default function Dashboard() {
                         ))}
                       </tr>
                     ))
-                  : topStocks.slice(0, 10).map((s, i) => (
-                      <tr key={s.symbol} className="data-table-row" data-testid={`row-stock-${s.symbol}`}>
+                  : enrichedStocks.map((s, i) => (
+                      <tr key={s.symbol} className="data-table-row">
                         <td className="px-3 py-2.5" style={{ color: '#4a6080' }}>{i + 1}</td>
                         <td className="px-3 py-2.5 font-bold" style={{ color: '#00FF88' }}>{s.symbol}</td>
                         <td className="px-3 py-2.5" style={{ color: '#8899aa' }}>{s.companyName}</td>
                         <td className="px-3 py-2.5 w-32"><ScoreBar score={s.ghostScore} /></td>
-                        <td className="px-3 py-2.5 tabular text-white">${s.price.toFixed(2)}</td>
+                        <td className="px-3 py-2.5"><LivePrice ticker={s.symbol} prices={prices} /></td>
                         <td className="px-3 py-2.5"><PctChange value={s.changePercent} /></td>
                       </tr>
                     ))
@@ -186,7 +305,7 @@ export default function Dashboard() {
             </table>
           </div>
 
-          {/* Market Overview Chart */}
+          {/* Market Overview */}
           <div className="col-span-2 rounded" style={{ background: '#11161C', border: '1px solid #1a2332' }}>
             <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#1a2332' }}>
               <span className="text-sm font-bold text-white uppercase tracking-wide">Market Overview</span>
@@ -219,43 +338,52 @@ export default function Dashboard() {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            {/* Index strip */}
+            {/* Live index strip */}
             <div className="grid grid-cols-2 gap-2 px-4 pb-4">
-              {[
-                { sym: 'SPY',  name: 'S&P 500 ETF',   price: '415.82', chg: '+1.32%', up: true },
-                { sym: 'DIA',  name: 'DJIA ETF',       price: '394.00', chg: '+0.86%', up: true },
-                { sym: 'QQQ',  name: 'NASDAQ ETF',     price: '457.12', chg: '+1.61%', up: true },
-                { sym: 'VIX',  name: 'Volatility Index',price: '13.64', chg: '-4.21%', up: false },
-              ].map(idx => (
-                <div key={idx.sym} className="flex items-center justify-between px-3 py-2 rounded"
-                  style={{ background: '#0d1219', border: '1px solid #1a2332' }}>
-                  <div>
-                    <div className="text-xs font-bold text-white">{idx.sym}</div>
-                    <div className="text-xs" style={{ color: '#4a6080' }}>{idx.name}</div>
+              {liveIndices.map(idx => {
+                const d = prices[idx.sym];
+                const up = (d?.changePct ?? 0) >= 0;
+                return (
+                  <div key={idx.sym} className="flex items-center justify-between px-3 py-2 rounded"
+                    style={{ background: '#0d1219', border: '1px solid #1a2332' }}>
+                    <div>
+                      <div className="text-xs font-bold text-white">{idx.sym}</div>
+                      <div className="text-xs" style={{ color: '#4a6080' }}>{idx.name}</div>
+                    </div>
+                    <div className="text-right">
+                      <LivePrice ticker={idx.sym} prices={prices} />
+                      <div className="text-xs tabular" style={{ color: up ? '#00FF88' : '#FF4444' }}>
+                        {d ? `${up ? '▲' : '▼'} ${Math.abs(d.changePct).toFixed(2)}%` : '—'}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-xs font-bold text-white tabular">{idx.price}</div>
-                    <div className="text-xs tabular" style={{ color: idx.up ? '#00FF88' : '#FF4444' }}>{idx.chg}</div>
-                  </div>
+                );
+              })}
+              {/* VIX static */}
+              <div className="flex items-center justify-between px-3 py-2 rounded"
+                style={{ background: '#0d1219', border: '1px solid #1a2332' }}>
+                <div>
+                  <div className="text-xs font-bold text-white">VIX</div>
+                  <div className="text-xs" style={{ color: '#4a6080' }}>Volatility Index</div>
                 </div>
-              ))}
+                <div className="text-right">
+                  <div className="text-xs font-bold text-white tabular">13.64</div>
+                  <div className="text-xs tabular" style={{ color: '#FF4444' }}>▼ 4.21%</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
         {/* Row 2: Sector Heatmap + AI Summary + Alerts */}
         <div className="grid grid-cols-3 gap-4">
-
-          {/* Sector Heatmap */}
           <div className="rounded" style={{ background: '#11161C', border: '1px solid #1a2332' }}>
             <div className="px-4 py-3 border-b" style={{ borderColor: '#1a2332' }}>
               <span className="text-sm font-bold text-white uppercase tracking-wide">Sector Heat Map</span>
             </div>
             <div className="grid grid-cols-2 gap-2 p-3">
               {sectorData.map(s => (
-                <div key={s.name}
-                  className={`sector-tile-${s.signal} rounded px-3 py-2`}
-                  data-testid={`sector-${s.name.toLowerCase().replace(/\s/g, '-')}`}>
+                <div key={s.name} className={`sector-tile-${s.signal} rounded px-3 py-2`}>
                   <div className="text-xs font-semibold truncate">{s.name}</div>
                   <div className="text-sm font-black tabular">{s.pct}%</div>
                 </div>
@@ -263,7 +391,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* AI Market Summary */}
           <div className="rounded" style={{ background: '#11161C', border: '1px solid #1a2332' }}>
             <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#1a2332' }}>
               <span className="text-sm font-bold text-white uppercase tracking-wide">AI Market Summary</span>
@@ -274,13 +401,13 @@ export default function Dashboard() {
             </div>
             <div className="p-4 space-y-3">
               <p className="text-sm leading-relaxed" style={{ color: '#8899aa' }}>
-                The market shows strong bullish momentum with improving breadth. Technology and Communication sectors are leading. Institutional buying is increasing in high-growth names across large-cap indices.
+                The market shows strong bullish momentum with improving breadth. Technology and Communication sectors are leading. Institutional buying is increasing in high-growth names.
               </p>
               <div className="space-y-2">
                 {[
-                  { label: 'Sentiment',  val: 'Bullish',  color: '#00FF88' },
-                  { label: 'Confidence', val: '74%',      color: '#3B82F6' },
-                  { label: 'Trend',      val: 'Uptrend',  color: '#00FF88' },
+                  { label: 'Sentiment',  val: 'Bullish', color: '#00FF88' },
+                  { label: 'Confidence', val: '74%',     color: '#3B82F6' },
+                  { label: 'Trend',      val: 'Uptrend', color: '#00FF88' },
                 ].map(m => (
                   <div key={m.label} className="flex justify-between items-center text-xs">
                     <span style={{ color: '#4a6080' }}>{m.label}</span>
@@ -289,14 +416,12 @@ export default function Dashboard() {
                 ))}
               </div>
               <button className="w-full py-2 rounded text-xs font-semibold mt-2"
-                style={{ background: 'rgba(0,255,136,0.08)', color: '#00FF88', border: '1px solid rgba(0,255,136,0.2)' }}
-                data-testid="button-view-full-analysis">
+                style={{ background: 'rgba(0,255,136,0.08)', color: '#00FF88', border: '1px solid rgba(0,255,136,0.2)' }}>
                 VIEW FULL ANALYSIS
               </button>
             </div>
           </div>
 
-          {/* Recent Alerts */}
           <div className="rounded" style={{ background: '#11161C', border: '1px solid #1a2332' }}>
             <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#1a2332' }}>
               <span className="text-sm font-bold text-white uppercase tracking-wide">Recent Alerts</span>
@@ -307,14 +432,13 @@ export default function Dashboard() {
             </div>
             <div className="divide-y" style={{ borderColor: '#1a2332' }}>
               {recentAlerts.map((a, i) => (
-                <div key={i} className="flex items-start gap-3 px-4 py-3 data-table-row"
-                  data-testid={`alert-${a.symbol.toLowerCase()}`}>
+                <div key={i} className="flex items-start gap-3 px-4 py-3 data-table-row">
                   <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0"
                     style={{ background: '#00FF88', boxShadow: '0 0 4px rgba(0,255,136,0.6)' }} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold" style={{ color: '#00FF88' }}>{a.symbol}</span>
-                      <span className="text-xs" style={{ color: '#8899aa' }} >{a.msg}</span>
+                      <span className="text-xs" style={{ color: '#8899aa' }}>{a.msg}</span>
                     </div>
                     <div className="text-xs mt-0.5" style={{ color: '#4a6080' }}>{a.time}</div>
                   </div>
@@ -323,8 +447,7 @@ export default function Dashboard() {
             </div>
             <div className="px-4 py-3 border-t" style={{ borderColor: '#1a2332' }}>
               <button className="w-full py-1.5 rounded text-xs font-semibold"
-                style={{ background: 'rgba(59,130,246,0.08)', color: '#3B82F6', border: '1px solid rgba(59,130,246,0.2)' }}
-                data-testid="button-view-all-alerts">
+                style={{ background: 'rgba(59,130,246,0.08)', color: '#3B82F6', border: '1px solid rgba(59,130,246,0.2)' }}>
                 VIEW ALL ALERTS
               </button>
             </div>
