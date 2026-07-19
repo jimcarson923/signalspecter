@@ -85,3 +85,15 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
 export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).omit({ id: true, createdAt: true });
 export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema>;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+
+// ── Watchlist ────────────────────────────────────────────────────────────────
+export const watchlist = sqliteTable('watchlist', {
+  id:        integer('id').primaryKey({ autoIncrement: true }),
+  userId:    integer('user_id').notNull(),
+  symbol:    text('symbol').notNull(),
+  addedAt:   integer('added_at').notNull(),
+  notes:     text('notes').default(''),
+});
+
+export type WatchlistItem = typeof watchlist.$inferSelect;
+export type InsertWatchlistItem = typeof watchlist.$inferInsert;
