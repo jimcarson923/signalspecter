@@ -31,10 +31,10 @@ sqlite.exec(`
   );
   CREATE TABLE IF NOT EXISTS watchlist_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 0,
     symbol TEXT NOT NULL,
-    company_name TEXT NOT NULL,
-    notes TEXT,
-    alert_price REAL
+    added_at INTEGER NOT NULL DEFAULT 0,
+    notes TEXT DEFAULT ''
   );
   CREATE TABLE IF NOT EXISTS saved_scans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,13 +64,6 @@ sqlite.exec(`
     triggered INTEGER NOT NULL DEFAULT 0,
     triggered_at INTEGER,
     created_at INTEGER
-  );
-  CREATE TABLE IF NOT EXISTS watchlist (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id   INTEGER NOT NULL,
-    symbol    TEXT NOT NULL,
-    added_at  INTEGER NOT NULL,
-    notes     TEXT DEFAULT ''
   );
   CREATE TABLE IF NOT EXISTS push_subscriptions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,34 +168,32 @@ class Storage {
   deletePushSubscription(endpoint: string): void {
     db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint)).run();
   }
-  // ── Watchlist ──────────────────────────────────────────────────────────────
-  getWatchlist(userId: number) {
-    return this.db
-      .prepare('SELECT * FROM watchlist WHERE user_id = ? ORDER BY added_at DESC')
-      .all(userId) as any[];
+
+  // ── Watchlist (user-scoped) ─────────────────────────────────────────────────
+  getWatchlist(userId: number): WatchlistItem[] {
+    return db.select().from(watchlistItems).where(eq(watchlistItems.userId, userId)).all();
   }
 
-  addToWatchlist(userId: number, symbol: string, notes = '') {
-    const existing = this.db
-      .prepare('SELECT id FROM watchlist WHERE user_id = ? AND symbol = ?')
-      .get(userId, symbol.toUpperCase());
-    if (existing) return existing;
-    return this.db
-      .prepare('INSERT INTO watchlist (user_id, symbol, added_at, notes) VALUES (?, ?, ?, ?)')
-      .run(userId, symbol.toUpperCase(), Date.now(), notes);
+  addToWatchlist(userId: number, symbol: string, notes = ''): WatchlistItem | null {
+    const sym = symbol.toUpperCase().trim();
+    const existing = db.select().from(watchlistItems)
+      .where(and(eq(watchlistItems.userId, userId), eq(watchlistItems.symbol, sym)))
+      .get();
+    if (existing) return existing as WatchlistItem;
+    return db.insert(watchlistItems).values({ userId, symbol: sym, addedAt: Date.now(), notes }).returning().get() as WatchlistItem;
   }
 
-  removeFromWatchlist(userId: number, symbol: string) {
-    return this.db
-      .prepare('DELETE FROM watchlist WHERE user_id = ? AND symbol = ?')
-      .run(userId, symbol.toUpperCase());
+  removeFromWatchlist(userId: number, symbol: string): void {
+    db.delete(watchlistItems)
+      .where(and(eq(watchlistItems.userId, userId), eq(watchlistItems.symbol, symbol.toUpperCase())))
+      .run();
   }
 
-  getAllWatchlistSymbols(): { userId: number; symbol: string }[] {
-    return this.db
-      .prepare('SELECT DISTINCT user_id as userId, symbol FROM watchlist')
-      .all() as any[];
+  getAllWatchlistItems(): { userId: number; symbol: string }[] {
+    return db.select({ userId: watchlistItems.userId, symbol: watchlistItems.symbol })
+      .from(watchlistItems).all() as { userId: number; symbol: string }[];
   }
+
 
 }
 
