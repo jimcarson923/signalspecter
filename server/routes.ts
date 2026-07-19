@@ -2,9 +2,7 @@ import type { Express } from 'express';
 import { createServer } from 'http';
 import { storage } from './storage';
 import { insertWatchlistItemSchema, insertSavedScanSchema } from '@shared/schema';
-import OpenAI from 'openai';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const POLYGON_BASE = 'https://api.polygon.io';
 
@@ -185,7 +183,7 @@ Requirements:
 - watch_list: exactly 8 real tickers
 - Be specific — use real company names, real market dynamics for ${dateStr}`;
 
-  const completion = await openai.chat.completions.create({
+  const completion = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
@@ -330,6 +328,13 @@ const PRICE_CACHE: Array<{
 
 // ── Routes ─────────────────────────────────────────────────────────────────────
 export async function registerRoutes(httpServer: ReturnType<typeof createServer>, app: Express) {
+
+  function getOpenAI() {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { default: OpenAI } = require('openai');
+    return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+
 
   // Market overview
   app.get('/api/market/overview', async (req, res) => {
@@ -540,8 +545,7 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     let explanation = '';
     try {
       const OpenAI = (await import('openai')).default;
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const completion = await openai.chat.completions.create({
+            const completion = await getOpenAI().chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [{
           role: 'system',
@@ -568,8 +572,7 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
 
     try {
       const OpenAI = (await import('openai')).default;
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const completion = await openai.chat.completions.create({
+            const completion = await getOpenAI().chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
           {
@@ -631,11 +634,10 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     try {
       const openaiModule = await import('openai');
       const OpenAI = openaiModule.default;
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const headlineText = headlines.length > 0
+            const headlineText = headlines.length > 0
         ? headlines.slice(0, 5).map(h => `- ${h.title}`).join('\n')
         : 'No major headlines yet today.';
-      const completion = await openai.chat.completions.create({
+      const completion = await getOpenAI().chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: 'You are Specter, an AI trading assistant. Give a 2-3 sentence spoken market briefing. Start with: Here is your market intelligence for today.' },
@@ -698,8 +700,7 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     try {
       const openaiModule = await import('openai');
       const OpenAI = openaiModule.default;
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const completion = await openai.chat.completions.create({
+            const completion = await getOpenAI().chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: 'You are Specter. Give a 2-sentence spoken delta summary. Be direct.' },
@@ -836,8 +837,7 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     try {
       const openaiModule = await import('openai');
       const OpenAI = openaiModule.default;
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const completion = await openai.chat.completions.create({
+            const completion = await getOpenAI().chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: 'You are Specter. Write a 2-sentence first-person investor profile analysis based on trading data. Be specific and insightful. Do not use generic disclaimers.' },
@@ -1139,29 +1139,33 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
 
 
   // ── Watchlist Routes ────────────────────────────────────────────────────────
-  app.get('/api/watchlist', requireAuth, (req, res) => {
-    const userId = (req.session as any).userId as number;
+  app.get('/api/watchlist', async (req: any, res: any) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const userId = req.session.userId as number;
     const items = storage.getWatchlist(userId);
     res.json(items);
   });
 
-  app.post('/api/watchlist', requireAuth, (req, res) => {
-    const userId = (req.session as any).userId as number;
+  app.post('/api/watchlist', async (req: any, res: any) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const userId = req.session.userId as number;
     const { symbol, notes } = req.body;
     if (!symbol) return res.status(400).json({ error: 'Symbol required' });
     const result = storage.addToWatchlist(userId, symbol.toUpperCase().trim(), notes || '');
     res.json({ ok: true, result });
   });
 
-  app.delete('/api/watchlist/:symbol', requireAuth, (req, res) => {
-    const userId = (req.session as any).userId as number;
+  app.delete('/api/watchlist/:symbol', async (req: any, res: any) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const userId = req.session.userId as number;
     storage.removeFromWatchlist(userId, req.params.symbol.toUpperCase());
     res.json({ ok: true });
   });
 
   // Watchlist enriched — fetch live price + Specter score for each ticker
-  app.get('/api/watchlist/enriched', requireAuth, async (req, res) => {
-    const userId = (req.session as any).userId as number;
+  app.get('/api/watchlist/enriched', async (req: any, res: any) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const userId = req.session.userId as number;
     const items = storage.getWatchlist(userId);
     const apiKey = process.env.POLYGON_API_KEY || 'wfPgfWPd_FNcmK8OmW0oGhWv_xz7CYNq';
 
@@ -1189,8 +1193,9 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
   });
 
   // Specter watchlist narration — AI reads through your watchlist
-  app.get('/api/watchlist/narrate', requireAuth, async (req, res) => {
-    const userId = (req.session as any).userId as number;
+  app.get('/api/watchlist/narrate', async (req: any, res: any) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const userId = req.session.userId as number;
     const items = storage.getWatchlist(userId);
     if (items.length === 0) {
       return res.json({ text: 'Your watchlist is empty. Add some tickers in the Watchlist page and I will monitor them for you.' });
@@ -1219,8 +1224,7 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     try {
       const openaiModule = await import('openai');
       const OpenAI = openaiModule.default;
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const completion = await openai.chat.completions.create({
+            const completion = await getOpenAI().chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [{
           role: 'system',
