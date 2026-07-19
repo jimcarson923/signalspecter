@@ -65,6 +65,13 @@ sqlite.exec(`
     triggered_at INTEGER,
     created_at INTEGER
   );
+  CREATE TABLE IF NOT EXISTS watchlist (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id   INTEGER NOT NULL,
+    symbol    TEXT NOT NULL,
+    added_at  INTEGER NOT NULL,
+    notes     TEXT DEFAULT ''
+  );
   CREATE TABLE IF NOT EXISTS push_subscriptions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -109,7 +116,6 @@ class Storage {
   }
 
   // ── Watchlist ──────────────────────────────────────────────────────────────
-  getWatchlist(): WatchlistItem[] { return db.select().from(watchlistItems).all(); }
   addWatchlistItem(item: InsertWatchlistItem): WatchlistItem {
     return db.insert(watchlistItems).values(item).returning().get();
   }
