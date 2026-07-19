@@ -1,225 +1,277 @@
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { apiRequest, queryClient } from '@/lib/queryClient';
-import { Bookmark, Plus, Trash2, Bell, Search } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Skeleton } from '@/components/ui/skeleton';
+import { useState, useEffect } from 'react';
+import { Plus, Trash2, TrendingUp, TrendingDown, Star, RefreshCw, Mic } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useState } from 'react';
-import type { WatchlistItem } from '@shared/schema';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
-} from '@/components/ui/dialog';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { insertWatchlistItemSchema } from '@shared/schema';
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { z } from 'zod';
 
-const formSchema = insertWatchlistItemSchema.extend({
-  symbol: z.string().min(1, 'Symbol required').max(6).toUpperCase(),
-  companyName: z.string().min(1, 'Company name required'),
-});
+type WatchItem = {
+  id: number;
+  symbol: string;
+  addedAt: number;
+  notes: string;
+  price?: number;
+  changePct?: number;
+  volume?: number;
+  specterScore?: number;
+};
 
-function AddSymbolDialog({ onSuccess }: { onSuccess: () => void }) {
-  const [open, setOpen] = useState(false);
-  const { toast } = useToast();
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: { symbol: '', companyName: '', notes: '', alertPrice: undefined },
-  });
-
-  const mutation = useMutation({
-    mutationFn: (data: z.infer<typeof formSchema>) =>
-      apiRequest('POST', '/api/watchlist', data).then(r => r.json()),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/watchlist'] });
-      setOpen(false);
-      form.reset();
-      toast({ title: 'Added to watchlist', description: form.getValues('symbol') });
-      onSuccess();
-    },
-  });
-
+function ScoreRing({ score }: { score: number }) {
+  const color = score >= 70 ? '#00FF88' : score >= 45 ? '#F59E0B' : '#FF4444';
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" className="gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground" data-testid="button-add-watchlist">
-          <Plus className="h-4 w-4" />
-          Add Symbol
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md bg-card border-border">
-        <DialogHeader>
-          <DialogTitle className="text-sm font-semibold">Add to Watchlist</DialogTitle>
-        </DialogHeader>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(d => mutation.mutate(d))} className="space-y-4">
-            <FormField control={form.control} name="symbol" render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-xs">Ticker Symbol</FormLabel>
-                <FormControl>
-                  <Input {...field} placeholder="e.g. NVDA" className="uppercase bg-muted/50" data-testid="input-watchlist-symbol" />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="companyName" render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-xs">Company Name</FormLabel>
-                <FormControl>
-                  <Input {...field} placeholder="e.g. NVIDIA Corp" className="bg-muted/50" data-testid="input-watchlist-company" />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="alertPrice" render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-xs">Alert Price (optional)</FormLabel>
-                <FormControl>
-                  <Input
-                    {...field}
-                    type="number"
-                    placeholder="e.g. 150.00"
-                    className="bg-muted/50"
-                    onChange={e => field.onChange(e.target.value ? parseFloat(e.target.value) : undefined)}
-                    value={field.value ?? ''}
-                    data-testid="input-watchlist-alert"
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="notes" render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-xs">Notes (optional)</FormLabel>
-                <FormControl>
-                  <Input {...field} placeholder="Why are you watching this?" className="bg-muted/50" value={field.value ?? ''} />
-                </FormControl>
-              </FormItem>
-            )} />
-            <Button type="submit" className="w-full bg-primary hover:bg-primary/90" disabled={mutation.isPending} data-testid="button-submit-watchlist">
-              {mutation.isPending ? 'Adding...' : 'Add to Watchlist'}
-            </Button>
-          </form>
-        </Form>
-      </DialogContent>
-    </Dialog>
+    <div className="flex flex-col items-center justify-center w-12 h-12 rounded-full border-2"
+      style={{ borderColor: color, background: `${color}12` }}>
+      <span className="text-xs font-black tabular" style={{ color }}>{Math.round(score)}</span>
+    </div>
+  );
+}
+
+function PctChange({ value }: { value: number }) {
+  const up = value >= 0;
+  return (
+    <span className="text-sm tabular font-bold flex items-center gap-1"
+      style={{ color: up ? '#00FF88' : '#FF4444' }}>
+      {up ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+      {up ? '+' : ''}{value.toFixed(2)}%
+    </span>
   );
 }
 
 export default function WatchlistPage() {
-  const { data: items, isLoading } = useQuery<WatchlistItem[]>({
-    queryKey: ['/api/watchlist'],
-    queryFn: () => apiRequest('GET', '/api/watchlist').then(r => r.json()),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => apiRequest('DELETE', `/api/watchlist/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['/api/watchlist'] }),
-  });
-
   const { toast } = useToast();
-  const [search, setSearch] = useState('');
+  const [items, setItems] = useState<WatchItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [newSymbol, setNewSymbol] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [narrating, setNarrating] = useState(false);
 
-  const filtered = items?.filter(i =>
-    i.symbol.toLowerCase().includes(search.toLowerCase()) ||
-    i.companyName.toLowerCase().includes(search.toLowerCase())
-  ) ?? [];
+  const fetchWatchlist = async (showRefresh = false) => {
+    if (showRefresh) setRefreshing(true);
+    try {
+      const res = await fetch('/api/watchlist/enriched', { credentials: 'include' });
+      if (res.ok) setItems(await res.json());
+    } catch { }
+    setLoading(false);
+    setRefreshing(false);
+  };
+
+  useEffect(() => { fetchWatchlist(); }, []);
+
+  const addTicker = async () => {
+    const sym = newSymbol.trim().toUpperCase();
+    if (!sym) return;
+    setAdding(true);
+    try {
+      const res = await fetch('/api/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ symbol: sym }),
+      });
+      if (res.ok) {
+        setNewSymbol('');
+        toast({ title: `${sym} added to watchlist`, description: 'Specter is now monitoring this stock.' });
+        await fetchWatchlist();
+      } else {
+        toast({ title: 'Could not add ticker', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error adding ticker', variant: 'destructive' });
+    }
+    setAdding(false);
+  };
+
+  const removeTicker = async (symbol: string) => {
+    try {
+      await fetch(`/api/watchlist/${symbol}`, { method: 'DELETE', credentials: 'include' });
+      setItems(prev => prev.filter(i => i.symbol !== symbol));
+      toast({ title: `${symbol} removed from watchlist` });
+    } catch {
+      toast({ title: 'Error removing ticker', variant: 'destructive' });
+    }
+  };
+
+  const narrateWatchlist = async () => {
+    if (narrating) return;
+    setNarrating(true);
+    try {
+      const res = await fetch('/api/watchlist/narrate', { credentials: 'include' });
+      const data = await res.json();
+      if (data.text) {
+        // Speak via ElevenLabs
+        const savedParams = (() => { try { return JSON.parse(localStorage.getItem('specterParams') || '{}'); } catch { return {}; } })();
+        const voicePref = savedParams.voice || 'adam';
+        const audioRes = await fetch('/api/specter/speak', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ text: data.text, voice: voicePref }),
+        });
+        if (audioRes.ok) {
+          const blob = await audioRes.blob();
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audio.onended = () => { URL.revokeObjectURL(url); setNarrating(false); };
+          audio.onerror = () => setNarrating(false);
+          await audio.play();
+          return;
+        }
+      }
+    } catch { }
+    setNarrating(false);
+  };
 
   return (
-    <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-5">
+    <div className="flex flex-col h-full min-h-0" style={{ background: '#0B0F14' }}>
+
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="px-6 py-4 border-b flex-shrink-0 flex items-center justify-between"
+        style={{ background: '#080C10', borderColor: '#1a2332' }}>
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center">
-              <Bookmark className="h-4 w-4 text-primary" />
-            </div>
-            <h1 className="text-lg font-bold">My Watchlist</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">Track your favorite stocks and set price alerts</p>
+          <h1 className="text-xl font-black text-white flex items-center gap-2">
+            <Star size={20} style={{ color: '#00FF88' }} />
+            WATCHLIST
+          </h1>
+          <p className="text-xs mt-0.5" style={{ color: '#4a6080' }}>
+            Specter monitors these 24/7 and alerts you on unusual moves
+          </p>
         </div>
-        <AddSymbolDialog onSuccess={() => toast({ title: 'Watchlist updated' })} />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={narrateWatchlist}
+            disabled={narrating || items.length === 0}
+            className="flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold transition-all"
+            style={{
+              background: narrating ? 'rgba(0,255,136,0.15)' : 'rgba(0,255,136,0.08)',
+              color: '#00FF88',
+              border: '1px solid rgba(0,255,136,0.25)',
+              opacity: items.length === 0 ? 0.4 : 1,
+            }}>
+            <Mic size={14} className={narrating ? 'animate-pulse' : ''} />
+            {narrating ? 'Specter Speaking...' : 'Brief Me'}
+          </button>
+          <button
+            onClick={() => fetchWatchlist(true)}
+            disabled={refreshing}
+            className="p-2 rounded transition-all"
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid #1a2332', color: '#4a6080' }}>
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
 
-      {/* Search */}
-      {(items?.length ?? 0) > 0 && (
-        <div className="relative max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Filter watchlist..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="pl-9 h-9 text-sm bg-muted/50 border-border/60"
-          />
-        </div>
-      )}
+      {/* Add ticker bar */}
+      <div className="px-6 py-3 flex-shrink-0 flex items-center gap-3"
+        style={{ background: '#0d1219', borderBottom: '1px solid #1a2332' }}>
+        <input
+          value={newSymbol}
+          onChange={e => setNewSymbol(e.target.value.toUpperCase())}
+          onKeyDown={e => e.key === 'Enter' && addTicker()}
+          placeholder="Add ticker — e.g. NVDA, AAPL, TSLA"
+          className="flex-1 px-4 py-2 rounded text-sm outline-none"
+          style={{ background: '#11161C', border: '1px solid #1a2332', color: '#fff' }}
+          maxLength={8}
+        />
+        <button
+          onClick={addTicker}
+          disabled={adding || !newSymbol.trim()}
+          className="flex items-center gap-2 px-5 py-2 rounded text-sm font-bold transition-all"
+          style={{
+            background: '#00FF88',
+            color: '#000',
+            opacity: adding || !newSymbol.trim() ? 0.5 : 1,
+          }}>
+          <Plus size={15} />
+          {adding ? 'Adding...' : 'Add'}
+        </button>
+      </div>
 
-      {/* Content */}
-      {isLoading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-4 p-4 rounded-lg border border-border/60 bg-card">
-              <Skeleton className="h-4 w-16" />
-              <Skeleton className="h-3 w-40 flex-1" />
-              <Skeleton className="h-7 w-16" />
+      {/* Watchlist table */}
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        {loading ? (
+          <div className="space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="skeleton h-16 rounded" />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <Star size={40} style={{ color: '#1a2332' }} className="mb-4" />
+            <p className="text-white font-bold mb-1">Your watchlist is empty</p>
+            <p className="text-sm" style={{ color: '#4a6080' }}>
+              Add tickers above and Specter will monitor them around the clock
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {/* Table header */}
+            <div className="grid grid-cols-12 gap-4 px-4 py-2 text-xs font-semibold"
+              style={{ color: '#4a6080' }}>
+              <div className="col-span-1">SCORE</div>
+              <div className="col-span-2">SYMBOL</div>
+              <div className="col-span-3">PRICE</div>
+              <div className="col-span-3">CHANGE</div>
+              <div className="col-span-2">VOLUME</div>
+              <div className="col-span-1"></div>
             </div>
-          ))}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground border border-dashed border-border rounded-xl">
-          <Bookmark className="h-12 w-12 mb-4 opacity-20" />
-          <p className="text-sm font-medium mb-1">{items?.length === 0 ? 'Your watchlist is empty' : 'No matches'}</p>
-          <p className="text-xs opacity-70 mb-4">
-            {items?.length === 0 ? 'Add stocks to track their Specter Score and get alerts' : 'Try a different search term'}
-          </p>
-          {items?.length === 0 && (
-            <AddSymbolDialog onSuccess={() => {}} />
-          )}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filtered.map(item => (
-            <div
-              key={item.id}
-              className="flex items-center gap-4 p-4 rounded-lg border border-border/60 bg-card hover:bg-muted/30 transition-colors"
-              data-testid={`card-watchlist-${item.id}`}
-            >
-              <div className="w-10 h-10 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-bold text-primary">{item.symbol.slice(0, 2)}</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-sm">{item.symbol}</span>
-                  {item.alertPrice && (
-                    <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-950/40 border border-amber-800/40 px-1.5 py-0.5 rounded">
-                      <Bell className="h-2.5 w-2.5" />
-                      Alert ${item.alertPrice}
-                    </span>
-                  )}
+
+            {items.map(item => (
+              <div key={item.id}
+                className="grid grid-cols-12 gap-4 items-center px-4 py-3 rounded transition-all"
+                style={{ background: '#11161C', border: '1px solid #1a2332' }}>
+
+                {/* Score */}
+                <div className="col-span-1">
+                  <ScoreRing score={item.specterScore ?? 50} />
                 </div>
-                <p className="text-xs text-muted-foreground truncate">{item.companyName}</p>
-                {item.notes && (
-                  <p className="text-xs text-muted-foreground/70 mt-0.5 italic truncate">{item.notes}</p>
-                )}
+
+                {/* Symbol */}
+                <div className="col-span-2">
+                  <div className="font-black text-base" style={{ color: '#00FF88' }}>{item.symbol}</div>
+                  <div className="text-xs" style={{ color: '#4a6080' }}>
+                    {new Date(item.addedAt).toLocaleDateString()}
+                  </div>
+                </div>
+
+                {/* Price */}
+                <div className="col-span-3">
+                  <div className="text-lg font-black tabular text-white">
+                    {item.price && item.price > 0 ? `$${item.price.toFixed(2)}` : '—'}
+                  </div>
+                </div>
+
+                {/* Change */}
+                <div className="col-span-3">
+                  {item.changePct !== undefined
+                    ? <PctChange value={item.changePct} />
+                    : <span className="text-zinc-600">—</span>
+                  }
+                </div>
+
+                {/* Volume */}
+                <div className="col-span-2">
+                  <div className="text-sm tabular" style={{ color: '#8899aa' }}>
+                    {item.volume
+                      ? item.volume >= 1_000_000
+                        ? `${(item.volume / 1_000_000).toFixed(1)}M`
+                        : `${(item.volume / 1_000).toFixed(0)}K`
+                      : '—'
+                    }
+                  </div>
+                </div>
+
+                {/* Remove */}
+                <div className="col-span-1 flex justify-end">
+                  <button
+                    onClick={() => removeTicker(item.symbol)}
+                    className="p-1.5 rounded transition-all hover:bg-red-500/10"
+                    style={{ color: '#4a6080' }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-muted-foreground hover:text-rose-400 flex-shrink-0"
-                onClick={() => deleteMutation.mutate(item.id)}
-                disabled={deleteMutation.isPending}
-                data-testid={`button-delete-${item.id}`}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
