@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import session from 'express-session';
 import MemoryStore from 'memorystore';
+import { WebSocketServer, WebSocket } from 'ws';
 import { registerRoutes } from "./routes";
 import { registerAuthRoutes } from "./auth";
 import { serveStatic } from "./static";
@@ -12,6 +13,70 @@ import { createServer } from "node:http";
 
 const app = express();
 const httpServer = createServer(app);
+
+// ── WebSocket Server (real-time prices) ─────────────────────────────────────
+const wss = new WebSocketServer({ server: httpServer, path: '/ws/prices' });
+
+// Live price cache — shared across all connections
+const priceCache: Record<string, { price: number; change: number; changePct: number; prev: number }> = {};
+
+// Tickers to track — top 20 most watched
+const WATCH_TICKERS = [
+  'NVDA','AAPL','MSFT','TSLA','AMZN','META','GOOGL','AMD','PLTR','COIN',
+  'SPY','QQQ','DIA','MARA','SOFI','LYFT','CLSK','SMR','MSTR','HOOD'
+];
+
+// Poll Polygon every 15 seconds for latest prices
+async function fetchLivePrices() {
+  const apiKey = process.env.POLYGON_API_KEY || 'wfPgfWPd_FNcmK8OmW0oGhWv_xz7CYNq';
+  const updates: Record<string, any> = {};
+
+  for (const ticker of WATCH_TICKERS) {
+    try {
+      const res = await fetch(
+        `https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?adjusted=true&apiKey=${apiKey}`
+      );
+      if (!res.ok) continue;
+      const data = await res.json() as any;
+      const result = data?.results?.[0];
+      if (!result) continue;
+
+      const price = result.c;
+      const prev = result.o;
+      const change = +(price - prev).toFixed(2);
+      const changePct = +(((price - prev) / prev) * 100).toFixed(2);
+
+      priceCache[ticker] = { price, change, changePct, prev };
+      updates[ticker] = priceCache[ticker];
+    } catch (_) {
+      // Skip failed tickers silently
+    }
+    // Small delay between calls to respect Polygon rate limit (5/min free tier)
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  // Broadcast updates to all connected clients
+  if (Object.keys(updates).length > 0) {
+    const msg = JSON.stringify({ type: 'price_update', data: updates, ts: Date.now() });
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(msg);
+      }
+    });
+  }
+}
+
+// Send current cache to a new client immediately on connect
+wss.on('connection', (ws) => {
+  if (Object.keys(priceCache).length > 0) {
+    ws.send(JSON.stringify({ type: 'price_update', data: priceCache, ts: Date.now() }));
+  }
+  ws.on('error', () => {});
+});
+
+// Start polling — initial fetch then every 15 seconds
+fetchLivePrices();
+setInterval(fetchLivePrices, 15_000);
 
 // Trust Railway's proxy so secure cookies work correctly over HTTPS
 app.set('trust proxy', 1);
@@ -44,10 +109,15 @@ app.use(session({
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: 7 * 24 * 60 * 60 * 1000,
     sameSite: 'lax',
   },
 }));
+
+// Expose live price cache via REST for initial page load
+app.get('/api/prices/live', (_req, res) => {
+  res.json({ prices: priceCache, ts: Date.now() });
+});
 
 declare module "http" {
   interface IncomingMessage { rawBody: unknown; }
@@ -86,9 +156,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Auth routes first
   registerAuthRoutes(app);
-
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
