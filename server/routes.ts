@@ -1137,6 +1137,147 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     }
   });
 
+
+  // ── Watchlist Routes ────────────────────────────────────────────────────────
+  app.get('/api/watchlist', requireAuth, (req, res) => {
+    const userId = (req.session as any).userId as number;
+    const items = storage.getWatchlist(userId);
+    res.json(items);
+  });
+
+  app.post('/api/watchlist', requireAuth, (req, res) => {
+    const userId = (req.session as any).userId as number;
+    const { symbol, notes } = req.body;
+    if (!symbol) return res.status(400).json({ error: 'Symbol required' });
+    const result = storage.addToWatchlist(userId, symbol.toUpperCase().trim(), notes || '');
+    res.json({ ok: true, result });
+  });
+
+  app.delete('/api/watchlist/:symbol', requireAuth, (req, res) => {
+    const userId = (req.session as any).userId as number;
+    storage.removeFromWatchlist(userId, req.params.symbol.toUpperCase());
+    res.json({ ok: true });
+  });
+
+  // Watchlist enriched — fetch live price + Specter score for each ticker
+  app.get('/api/watchlist/enriched', requireAuth, async (req, res) => {
+    const userId = (req.session as any).userId as number;
+    const items = storage.getWatchlist(userId);
+    const apiKey = process.env.POLYGON_API_KEY || 'wfPgfWPd_FNcmK8OmW0oGhWv_xz7CYNq';
+
+    const enriched = await Promise.all(items.map(async (item: any) => {
+      try {
+        const r = await fetch(
+          `https://api.polygon.io/v2/aggs/ticker/${item.symbol}/prev?adjusted=true&apiKey=${apiKey}`
+        );
+        const data = await r.json() as any;
+        const result = data?.results?.[0];
+        const price      = result?.c ?? 0;
+        const prev       = result?.o ?? price;
+        const changePct  = prev > 0 ? +((price - prev) / prev * 100).toFixed(2) : 0;
+        const volume     = result?.v ?? 0;
+        const specterScore = Math.min(95, Math.max(20,
+          Math.round(50 + changePct * 3 + (volume > 5000000 ? 10 : volume > 1000000 ? 5 : 0))
+        ));
+        return { ...item, price, changePct, volume, specterScore };
+      } catch {
+        return { ...item, price: 0, changePct: 0, volume: 0, specterScore: 50 };
+      }
+    }));
+
+    res.json(enriched);
+  });
+
+  // Specter watchlist narration — AI reads through your watchlist
+  app.get('/api/watchlist/narrate', requireAuth, async (req, res) => {
+    const userId = (req.session as any).userId as number;
+    const items = storage.getWatchlist(userId);
+    if (items.length === 0) {
+      return res.json({ text: 'Your watchlist is empty. Add some tickers in the Watchlist page and I will monitor them for you.' });
+    }
+
+    const apiKey = process.env.POLYGON_API_KEY || 'wfPgfWPd_FNcmK8OmW0oGhWv_xz7CYNq';
+    const summaries: string[] = [];
+
+    for (const item of items.slice(0, 8)) {
+      try {
+        const r = await fetch(
+          `https://api.polygon.io/v2/aggs/ticker/${item.symbol}/prev?adjusted=true&apiKey=${apiKey}`
+        );
+        const data = await r.json() as any;
+        const result = data?.results?.[0];
+        if (result) {
+          const price = result.c;
+          const changePct = +((result.c - result.o) / result.o * 100).toFixed(2);
+          const direction = changePct >= 0 ? 'up' : 'down';
+          summaries.push(`${item.symbol} is ${direction} ${Math.abs(changePct).toFixed(2)} percent at ${price.toFixed(2)}`);
+        }
+      } catch { summaries.push(`${item.symbol} data unavailable`); }
+      await new Promise(r => setTimeout(r, 150));
+    }
+
+    try {
+      const openaiModule = await import('openai');
+      const OpenAI = openaiModule.default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'system',
+          content: 'You are Specter, an AI trading intelligence. Give a brief, sharp watchlist briefing. Sound like Jarvis — confident, informative, no filler words. Keep it under 100 words.',
+        }, {
+          role: 'user',
+          content: `Watchlist status: ${summaries.join('. ')}. Give me a quick briefing.`,
+        }],
+        max_tokens: 150,
+      });
+      res.json({ text: completion.choices[0].message.content });
+    } catch {
+      res.json({ text: `Here is your watchlist update. ${summaries.join('. ')}.` });
+    }
+  });
+
+  // ── Watchlist Monitor (runs every 15 min, fires push on unusual moves) ──────
+  const watchlistAlertCooldown = new Map<string, number>(); // key: userId-symbol
+
+  async function checkWatchlistMoves() {
+    const apiKey = process.env.POLYGON_API_KEY || 'wfPgfWPd_FNcmK8OmW0oGhWv_xz7CYNq';
+    const allItems = storage.getAllWatchlistSymbols();
+    const uniqueSymbols = [...new Set(allItems.map((i: any) => i.symbol))];
+
+    for (const symbol of uniqueSymbols) {
+      try {
+        const r = await fetch(
+          `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${apiKey}`
+        );
+        const data = await r.json() as any;
+        const result = data?.results?.[0];
+        if (!result) continue;
+
+        const changePct = Math.abs((result.c - result.o) / result.o * 100);
+        const isUnusual = changePct >= 3; // 3%+ move triggers alert
+
+        if (isUnusual) {
+          const usersWatching = allItems.filter((i: any) => i.symbol === symbol);
+          for (const item of usersWatching) {
+            const cooldownKey = `${item.userId}-${symbol}`;
+            const lastAlert = watchlistAlertCooldown.get(cooldownKey) || 0;
+            if (Date.now() - lastAlert < 4 * 60 * 60 * 1000) continue; // 4hr cooldown
+
+            const direction = result.c > result.o ? '▲' : '▼';
+            const msg = `${symbol} ${direction} ${changePct.toFixed(1)}% — Specter detected an unusual move on your watchlist.`;
+            await sendPush(item.userId, `⚡ ${symbol} Alert`, msg);
+            watchlistAlertCooldown.set(cooldownKey, Date.now());
+          }
+        }
+        await new Promise(r => setTimeout(r, 12000)); // 12s stagger = max 5 tickers/min (Polygon free tier)
+      } catch { }
+    }
+  }
+
+  // Run watchlist monitor every 1 minute (staggered calls to respect Polygon 5/min free tier)
+  setInterval(checkWatchlistMoves, 60 * 1000);
+
   return httpServer;
 }
 
