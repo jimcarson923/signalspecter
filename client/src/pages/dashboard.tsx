@@ -1,3 +1,4 @@
+// Phase 6: Real-time prices — build 1784480580
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { useState, useEffect, useRef } from 'react';
