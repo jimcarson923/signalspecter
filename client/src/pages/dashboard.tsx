@@ -2,7 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { useState, useEffect, useRef } from 'react';
-import { TrendingUp, TrendingDown, Activity, Search, Wifi } from 'lucide-react';
+import { Search, Wifi } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import type { Stock } from '@shared/schema';
 
@@ -13,7 +13,7 @@ type PriceMap  = Record<string, PriceData>;
 function useLivePrices(): { prices: PriceMap; connected: boolean } {
   const [prices, setPrices] = useState<PriceMap>({});
   const [connected, setConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<InstanceType<typeof window.WebSocket> | null>(null);
 
   useEffect(() => {
     // Initial REST load so prices show instantly before WS connects
@@ -24,7 +24,7 @@ function useLivePrices(): { prices: PriceMap; connected: boolean } {
 
     // Connect WebSocket
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${window.location.host}/ws/prices`);
+    const ws = new window.WebSocket(`${proto}://${window.location.host}/ws/prices`);
     wsRef.current = ws;
 
     ws.onopen  = () => setConnected(true);
