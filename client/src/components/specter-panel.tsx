@@ -6,6 +6,11 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/hooks/useAuth';
 
+// ── Global audio lock — prevents double-speak when two SpecterPanel instances mount ──
+let _specterSpeaking = false;
+let _specterGreeted = false;
+
+
 // ── Types ──────────────────────────────────────────────────────────────────
 interface StockPick { ticker: string; price: number; score: number; bullish: boolean; }
 interface NewsHeadline { title: string; source: string; url: string; time: string; }
@@ -54,6 +59,8 @@ export function SpecterPanel() {
   const recognitionRef = useRef<any>(null);
 
   const speak = useCallback(async (text: string) => {
+    if (_specterSpeaking) return;
+    _specterSpeaking = true;
     if (muted) return;
 
     // Stop any currently playing audio
@@ -82,9 +89,11 @@ export function SpecterPanel() {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioRef.current = audio;
-      audio.onended = () => URL.revokeObjectURL(url);
+      audio.onended = () => { URL.revokeObjectURL(url); _specterSpeaking = false; };
+      audio.onerror = () => { _specterSpeaking = false; };
       await audio.play();
     } catch (_) {
+      _specterSpeaking = false;
       // Fallback to browser TTS if OpenAI fails
       if (typeof window === 'undefined') return;
       window.speechSynthesis.cancel();
@@ -130,7 +139,8 @@ export function SpecterPanel() {
 
   // Greeting + market intel on load
   useEffect(() => {
-    if (!user || greeted) return;
+    if (!user || greeted || _specterGreeted) return;
+    _specterGreeted = true;
     setGreeted(true);
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
