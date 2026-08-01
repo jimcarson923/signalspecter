@@ -1,33 +1,21 @@
-// SignalSpecter Service Worker — Phase 4 PWA
-const CACHE_NAME = 'signalspecter-v1';
-const STATIC_ASSETS = [
-  '/',
-  '/src/main.tsx',
-];
+// SignalSpecter Service Worker — v3 (network-first)
+const CACHE_NAME = 'signalspecter-v3';
 
-// Install — cache static shell
+// Install — skip waiting immediately
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch(() => {
-        // Silently fail if assets aren't available yet
-      });
-    })
-  );
   self.skipWaiting();
 });
 
-// Activate — clean old caches
+// Activate — delete ALL old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+      Promise.all(keys.map((k) => caches.delete(k)))
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// Fetch — network first for API, cache first for static assets
+// Fetch — network FIRST for everything (no stale cache)
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
@@ -35,7 +23,7 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(event.request).catch(() =>
-        new Response(JSON.stringify({ error: 'Offline — no network connection' }), {
+        new Response(JSON.stringify({ error: 'Offline' }), {
           headers: { 'Content-Type': 'application/json' },
           status: 503,
         })
@@ -44,22 +32,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for everything else (app shell)
+  // Network-first for app shell — always get fresh bundle
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        if (response.ok && event.request.method === 'GET') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      }).catch(() => caches.match('/'));
-    })
+    fetch(event.request).catch(() => caches.match(event.request))
   );
 });
 
-// Push notifications (Phase 5)
+// Push notifications
 self.addEventListener('push', (event) => {
   const data = event.data?.json() ?? {};
   event.waitUntil(
