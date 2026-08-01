@@ -93,18 +93,8 @@ export function SpecterPanel() {
       audio.onerror = () => { _specterSpeaking = false; };
       await audio.play();
     } catch (_) {
+      // Silent fail — no browser TTS fallback (keeps Jarvis quality)
       _specterSpeaking = false;
-      // Fallback to browser TTS if OpenAI fails
-      if (typeof window === 'undefined') return;
-      window.speechSynthesis.cancel();
-      const utt = new SpeechSynthesisUtterance(text);
-      utt.rate = 0.88; utt.pitch = 0.78; utt.volume = 1;
-      const voices = window.speechSynthesis.getVoices();
-      const preferred = voices.find(v =>
-        v.name.includes('Arthur') || v.name.includes('Daniel') || v.name.includes('Google UK English Male')
-      );
-      if (preferred) utt.voice = preferred;
-      window.speechSynthesis.speak(utt);
     }
   }, [muted]);
 
@@ -160,8 +150,7 @@ export function SpecterPanel() {
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.speechSynthesis.getVoices();
-      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+      // Browser TTS removed — ElevenLabs only
     }
   }, []);
 
