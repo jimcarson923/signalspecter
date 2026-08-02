@@ -11,8 +11,11 @@ import { useToast } from '@/hooks/use-toast';
 const SECTORS = ['All', 'Tech', 'Energy', 'Finance', 'Healthcare', 'EV/Auto'];
 
 const VOICES = [
-  { id: 'antoni', label: 'Antoni', gender: 'Male',   desc: 'Confident, expressive — closest to Jarvis' },
+  { id: 'daniel', label: 'Daniel', gender: 'Male',   desc: 'British, authoritative — Jarvis-style (RECOMMENDED)' },
+  { id: 'josh',   label: 'Josh',   gender: 'Male',   desc: 'Deep, confident American male' },
+  { id: 'arnold', label: 'Arnold', gender: 'Male',   desc: 'Strong, powerful, commanding' },
   { id: 'adam',   label: 'Adam',   gender: 'Male',   desc: 'Deep, calm, authoritative' },
+  { id: 'antoni', label: 'Antoni', gender: 'Male',   desc: 'Confident, expressive' },
   { id: 'rachel', label: 'Rachel', gender: 'Female', desc: 'Clear, calm, professional' },
   { id: 'domi',   label: 'Domi',   gender: 'Female', desc: 'Strong, expressive, assertive' },
 ];
@@ -27,7 +30,7 @@ export default function SettingsPage() {
     minScore: 50,
     sector: 'All',
     minVolume: 0,
-    voice: 'adam',
+    voice: 'daniel',
   });
 
   useEffect(() => {
