@@ -2,12 +2,16 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import {
   users, watchlistItems, savedScans, trades, alerts, pushSubscriptions,
+  paperAccounts, paperPositions, paperTrades,
   type User, type InsertUser,
   type WatchlistItem, type InsertWatchlistItem,
   type SavedScan, type InsertSavedScan,
   type Trade, type InsertTrade,
   type Alert, type InsertAlert,
   type PushSubscription, type InsertPushSubscription,
+  type PaperAccount, type InsertPaperAccount,
+  type PaperPosition, type InsertPaperPosition,
+  type PaperTrade, type InsertPaperTrade,
 } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
@@ -64,6 +68,35 @@ sqlite.exec(`
     triggered INTEGER NOT NULL DEFAULT 0,
     triggered_at INTEGER,
     created_at INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS paper_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL UNIQUE,
+    starting_cash REAL NOT NULL DEFAULT 10000,
+    cash REAL NOT NULL DEFAULT 10000,
+    created_at INTEGER,
+    reset_at INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS paper_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    shares REAL NOT NULL,
+    avg_cost REAL NOT NULL,
+    bought_at INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS paper_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    action TEXT NOT NULL,
+    shares REAL NOT NULL,
+    price REAL NOT NULL,
+    total REAL NOT NULL,
+    pnl REAL,
+    pnl_pct REAL,
+    coaching TEXT,
+    traded_at INTEGER
   );
   CREATE TABLE IF NOT EXISTS push_subscriptions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -194,6 +227,44 @@ class Storage {
       .from(watchlistItems).all() as { userId: number; symbol: string }[];
   }
 
+
+  // ── Paper Trading ─────────────────────────────────────────────────────────
+  getPaperAccount(userId: number): PaperAccount | undefined {
+    return db.select().from(paperAccounts).where(eq(paperAccounts.userId, userId)).get();
+  }
+  createPaperAccount(userId: number, startingCash: number): PaperAccount {
+    return db.insert(paperAccounts).values({ userId, startingCash, cash: startingCash }).returning().get();
+  }
+  updatePaperCash(userId: number, cash: number): void {
+    db.update(paperAccounts).set({ cash }).where(eq(paperAccounts.userId, userId)).run();
+  }
+  resetPaperAccount(userId: number): void {
+    const acct = this.getPaperAccount(userId);
+    if (!acct) return;
+    db.update(paperAccounts).set({ cash: acct.startingCash, resetAt: new Date() }).where(eq(paperAccounts.userId, userId)).run();
+    db.delete(paperPositions).where(eq(paperPositions.userId, userId)).run();
+  }
+  getPaperPositions(userId: number): PaperPosition[] {
+    return db.select().from(paperPositions).where(eq(paperPositions.userId, userId)).all();
+  }
+  getPaperPosition(userId: number, symbol: string): PaperPosition | undefined {
+    return db.select().from(paperPositions).where(and(eq(paperPositions.userId, userId), eq(paperPositions.symbol, symbol))).get();
+  }
+  addPaperPosition(data: InsertPaperPosition): PaperPosition {
+    return db.insert(paperPositions).values(data).returning().get();
+  }
+  updatePaperPosition(id: number, shares: number, avgCost: number): void {
+    db.update(paperPositions).set({ shares, avgCost }).where(eq(paperPositions.id, id)).run();
+  }
+  deletePaperPosition(id: number): void {
+    db.delete(paperPositions).where(eq(paperPositions.id, id)).run();
+  }
+  addPaperTrade(data: InsertPaperTrade): PaperTrade {
+    return db.insert(paperTrades).values(data).returning().get();
+  }
+  getPaperTrades(userId: number): PaperTrade[] {
+    return db.select().from(paperTrades).where(eq(paperTrades.userId, userId)).all();
+  }
 
 }
 
