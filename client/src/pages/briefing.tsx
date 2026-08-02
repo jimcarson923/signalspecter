@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useState, useRef } from 'react';
 import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +17,8 @@ import {
   BarChart2,
   Eye,
   Shield,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 
 interface BriefingData {
@@ -115,6 +118,36 @@ export default function BriefingPage() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const [speaking, setSpeaking] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const handleSpeak = async () => {
+    if (speaking) { audioRef.current?.pause(); setSpeaking(false); return; }
+    if (!briefing) return;
+    setSpeaking(true);
+    try {
+      let voicePref = 'daniel';
+      try {
+        const pr = await fetch('/api/specter/params', { credentials: 'include' });
+        if (pr.ok) { const pd = await pr.json(); voicePref = pd.voice || 'daniel'; }
+      } catch {}
+      const text = `Market briefing for ${briefing.date}. Sentiment is ${briefing.market_sentiment}. ${briefing.headline}. ${briefing.summary}`;
+      const res = await fetch('/api/specter/speak', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ text, voice: voicePref }),
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        audio.onended = () => { setSpeaking(false); URL.revokeObjectURL(url); };
+        audio.onerror = () => setSpeaking(false);
+        await audio.play();
+      } else { setSpeaking(false); }
+    } catch { setSpeaking(false); }
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-5 max-w-7xl mx-auto">
       {/* Page header */}
@@ -130,17 +163,30 @@ export default function BriefingPage() {
             </p>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="gap-1.5 text-xs"
-          data-testid="button-refresh-briefing"
-        >
-          <RefreshCw className={`w-3 h-3 ${isFetching ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSpeak}
+            disabled={!briefing}
+            className="gap-1.5 text-xs"
+            style={{ color: speaking ? '#00FF88' : undefined, borderColor: speaking ? 'rgba(0,255,136,0.4)' : undefined }}
+          >
+            {speaking ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
+            {speaking ? 'Stop' : 'Hear Briefing'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="gap-1.5 text-xs"
+            data-testid="button-refresh-briefing"
+          >
+            <RefreshCw className={`w-3 h-3 ${isFetching ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {isLoading && <BriefingSkeleton />}
