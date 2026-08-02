@@ -1,3 +1,4 @@
+// Chart Plans v1.1 — Phase 8
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, TrendingUp, TrendingDown, Target, ShieldAlert, ArrowUpCircle, ArrowDownCircle, RefreshCw, Volume2, VolumeX, BarChart2 } from 'lucide-react';
 
