@@ -85,3 +85,49 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
 export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).omit({ id: true, createdAt: true });
 export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema>;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+
+// ── Paper Trading ─────────────────────────────────────────────────────────────
+
+// Paper trading accounts (one per user)
+export const paperAccounts = sqliteTable('paper_accounts', {
+  id:           integer('id').primaryKey({ autoIncrement: true }),
+  userId:       integer('user_id').notNull().unique(),
+  startingCash: real('starting_cash').notNull().default(10000),
+  cash:         real('cash').notNull().default(10000),
+  createdAt:    integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  resetAt:      integer('reset_at',   { mode: 'timestamp' }),
+});
+export const insertPaperAccountSchema = createInsertSchema(paperAccounts).omit({ id: true, createdAt: true, resetAt: true });
+export type InsertPaperAccount = z.infer<typeof insertPaperAccountSchema>;
+export type PaperAccount = typeof paperAccounts.$inferSelect;
+
+// Open paper positions
+export const paperPositions = sqliteTable('paper_positions', {
+  id:        integer('id').primaryKey({ autoIncrement: true }),
+  userId:    integer('user_id').notNull(),
+  symbol:    text('symbol').notNull(),
+  shares:    real('shares').notNull(),
+  avgCost:   real('avg_cost').notNull(),
+  boughtAt:  integer('bought_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+export const insertPaperPositionSchema = createInsertSchema(paperPositions).omit({ id: true, boughtAt: true });
+export type InsertPaperPosition = z.infer<typeof insertPaperPositionSchema>;
+export type PaperPosition = typeof paperPositions.$inferSelect;
+
+// Closed paper trades (history)
+export const paperTrades = sqliteTable('paper_trades', {
+  id:          integer('id').primaryKey({ autoIncrement: true }),
+  userId:      integer('user_id').notNull(),
+  symbol:      text('symbol').notNull(),
+  action:      text('action').notNull(), // 'buy' | 'sell'
+  shares:      real('shares').notNull(),
+  price:       real('price').notNull(),
+  total:       real('total').notNull(),
+  pnl:         real('pnl'),             // null for buys, realized P&L for sells
+  pnlPct:      real('pnl_pct'),
+  coaching:    text('coaching'),        // Specter's post-trade verdict
+  tradedAt:    integer('traded_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+export const insertPaperTradeSchema = createInsertSchema(paperTrades).omit({ id: true, tradedAt: true });
+export type InsertPaperTrade = z.infer<typeof insertPaperTradeSchema>;
+export type PaperTrade = typeof paperTrades.$inferSelect;
