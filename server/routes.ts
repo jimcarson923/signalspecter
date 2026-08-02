@@ -1324,6 +1324,123 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
   });
 
 
+  // ── Unusual Volume / Options Flow ──────────────────────────────────────────
+  // GET /api/flow?filter=all|bullish|bearish&minMultiple=2
+  // Scans 40 major tickers for unusual volume vs 10-day average
+  app.get('/api/flow', async (req, res) => {
+    const POLY_KEY = process.env.POLYGON_API_KEY;
+    const minMultiple = parseFloat((req.query.minMultiple as string) || '1.5');
+    const filter = (req.query.filter as string) || 'all';
+
+    const WATCHLIST = [
+      'NVDA','AMD','INTC','TSLA','AAPL','MSFT','META','AMZN','GOOGL','NFLX',
+      'SPY','QQQ','AAPL','BABA','DIS','BA','GS','JPM','BAC','WFC',
+      'XOM','CVX','PFE','JNJ','UNH','MRNA','ABBV','LLY','MRK','BMY',
+      'COIN','HOOD','MSTR','PLTR','RBLX','SNAP','UBER','LYFT','DKNG','GME',
+    ];
+
+    const toStr   = new Date().toISOString().split('T')[0];
+    const fromDt  = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+    const fromStr = fromDt.toISOString().split('T')[0];
+
+    interface FlowRow {
+      symbol: string; price: number; change: number; changePct: number;
+      todayVol: number; avgVol: number; volMultiple: number;
+      sentiment: string; sector: string; signal: string;
+    }
+
+    const results: FlowRow[] = [];
+    const SECTOR_MAP: Record<string, string> = {
+      NVDA:'Tech', AMD:'Tech', INTC:'Tech', TSLA:'Auto', AAPL:'Tech', MSFT:'Tech',
+      META:'Tech', AMZN:'Tech', GOOGL:'Tech', NFLX:'Tech', SPY:'ETF', QQQ:'ETF',
+      BABA:'Tech', DIS:'Media', BA:'Industrial', GS:'Finance', JPM:'Finance',
+      BAC:'Finance', WFC:'Finance', XOM:'Energy', CVX:'Energy', PFE:'Health',
+      JNJ:'Health', UNH:'Health', MRNA:'Health', ABBV:'Health', LLY:'Health',
+      MRK:'Health', BMY:'Health', COIN:'Crypto', HOOD:'Finance', MSTR:'Crypto',
+      PLTR:'Tech', RBLX:'Tech', SNAP:'Tech', UBER:'Tech', LYFT:'Tech',
+      DKNG:'Gaming', GME:'Retail',
+    };
+
+    // Fetch each ticker sequentially with small delay to avoid rate limits
+    for (const sym of WATCHLIST) {
+      try {
+        await new Promise(r => setTimeout(r, 120)); // 120ms between calls
+        const url = 'https://api.polygon.io/v2/aggs/ticker/' + sym + '/range/1/day/' + fromStr + '/' + toStr + '?adjusted=true&sort=asc&limit=15&apiKey=' + POLY_KEY;
+        const r   = await fetch(url);
+        const d   = await r.json() as { results?: Array<{ c: number; v: number; o: number }> };
+        if (!d.results || d.results.length < 3) continue;
+
+        const candles   = d.results;
+        const latest    = candles[candles.length - 1];
+        const prev      = candles[candles.length - 2];
+        const avgVol    = candles.slice(0, -1).reduce((s, c) => s + c.v, 0) / (candles.length - 1);
+        const todayVol  = latest.v;
+        const multiple  = todayVol / Math.max(avgVol, 1);
+        if (multiple < minMultiple) continue;
+
+        const change    = latest.c - prev.c;
+        const changePct = (change / prev.c) * 100;
+        const sentiment = changePct >= 0 ? 'Bullish' : 'Bearish';
+
+        if (filter === 'bullish' && sentiment !== 'Bullish') continue;
+        if (filter === 'bearish' && sentiment !== 'Bearish') continue;
+
+        // Signal label
+        let signal = 'Volume Spike';
+        if (multiple >= 5)      signal = 'Extreme Volume';
+        else if (multiple >= 3) signal = 'Heavy Volume';
+        else if (multiple >= 2) signal = 'Elevated Volume';
+
+        results.push({
+          symbol: sym,
+          price:      +latest.c.toFixed(2),
+          change:     +change.toFixed(2),
+          changePct:  +changePct.toFixed(2),
+          todayVol:   Math.round(todayVol),
+          avgVol:     Math.round(avgVol),
+          volMultiple: +multiple.toFixed(1),
+          sentiment,
+          sector: SECTOR_MAP[sym] || 'Other',
+          signal,
+        });
+      } catch { continue; }
+    }
+
+    // Sort by volume multiple descending
+    results.sort((a, b) => b.volMultiple - a.volMultiple);
+
+    // Generate Specter narrative for top movers
+    const top3 = results.slice(0, 3);
+    let narrative = '';
+    if (top3.length > 0) {
+      const openaiKey = process.env.OPENAI_API_KEY;
+      if (openaiKey && top3.length > 0) {
+        try {
+          const summary = top3.map(r => r.symbol + ' (' + r.volMultiple + 'x vol, ' + (r.changePct >= 0 ? '+' : '') + r.changePct + '%, ' + r.sentiment + ')').join('; ');
+          const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + openaiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini', max_tokens: 150,
+              messages: [
+                { role: 'system', content: 'You are Specter, elite AI market analyst. Summarize unusual volume activity in 2 sharp sentences. Mention the top movers and what it signals about smart money positioning. Sound authoritative and concise.' },
+                { role: 'user',   content: 'Unusual volume detected today: ' + summary + '. What is smart money doing?' },
+              ],
+            }),
+          });
+          const aiData = await aiRes.json() as { choices?: Array<{ message?: { content?: string } }> };
+          narrative = aiData.choices?.[0]?.message?.content?.trim() ?? '';
+        } catch { narrative = ''; }
+      }
+      if (!narrative) {
+        narrative = 'Smart money is active today. ' + top3[0].symbol + ' leads with ' + top3[0].volMultiple + 'x normal volume — ' + (top3[0].sentiment === 'Bullish' ? 'institutional buyers are accumulating.' : 'heavy selling pressure detected.');
+      }
+    }
+
+    res.json({ results, narrative, scannedAt: new Date().toISOString(), count: results.length });
+  });
+
+
   // ── Chart Plans ─────────────────────────────────────────────────────────────
   app.get('/api/chart/:symbol', async (req, res) => {
     const symbol = (req.params.symbol || '').toUpperCase().trim();
