@@ -1,50 +1,63 @@
-// Chart Plans v1.1 — Phase 8
+// Chart Plans v2 — Phase 8
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, TrendingUp, TrendingDown, Target, ShieldAlert, ArrowUpCircle, ArrowDownCircle, RefreshCw, Volume2, VolumeX, BarChart2 } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Target, ShieldAlert, ArrowUpCircle, BarChart2, RefreshCw, Volume2, VolumeX } from 'lucide-react';
 
 interface Candle { t: number; o: number; h: number; l: number; c: number; v: number; }
+interface ChartLevels { support1: number; support2: number; resistance1: number; resistance2: number; }
+interface Zone { low: number; high: number; }
+interface Plan { entry: number; target: number; stop: number; rr: number; }
 interface ChartData {
-  symbol: string; timeframe: string; currentPrice: number; trend: string; sma20: number;
+  symbol: string;
+  timeframe: string;
+  currentPrice: number;
+  trend: string;
+  sma20: number;
   candles: Candle[];
-  levels: { support1: number; support2: number; resistance1: number; resistance2: number };
-  buyZone: { low: number; high: number };
-  sellZone: { low: number; high: number };
-  plan: { entry: number; target: number; stop: number; rr: number };
+  levels: ChartLevels;
+  buyZone: Zone;
+  sellZone: Zone;
+  plan: Plan;
   narrative: string;
 }
 
+interface TooltipState { x: number; y: number; candle: Candle; }
+
 const TIMEFRAMES = ['1D', '1W', '1M', '3M'];
+const W = 900, H = 420;
+const PAD = { top: 20, right: 70, bottom: 40, left: 10 };
+const chartW = W - PAD.left - PAD.right;
+const chartH = H - PAD.top - PAD.bottom;
 
 function CandlestickChart({ data }: { data: ChartData }) {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; candle: Candle } | null>(null);
-
-  const W = 900, H = 420, PAD = { top: 20, right: 60, bottom: 40, left: 60 };
-  const chartW = W - PAD.left - PAD.right;
-  const chartH = H - PAD.top - PAD.bottom;
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
   const candles = data.candles;
-  const allPrices = candles.flatMap(c => [c.h, c.l]);
-  allPrices.push(data.levels.resistance2, data.levels.support2, data.buyZone.low, data.sellZone.high);
+  const allPrices: number[] = [
+    ...candles.flatMap(c => [c.h, c.l]),
+    data.levels.resistance2, data.levels.support2,
+    data.buyZone.low, data.sellZone.high,
+  ];
   const priceMin = Math.min(...allPrices) * 0.999;
   const priceMax = Math.max(...allPrices) * 1.001;
+  const priceRange = priceMax - priceMin || 1;
 
-  const xScale = (i: number) => PAD.left + (i / (candles.length - 1 || 1)) * chartW;
-  const yScale = (p: number) => PAD.top + chartH - ((p - priceMin) / (priceMax - priceMin)) * chartH;
+  const xScale = (i: number) => PAD.left + (i / Math.max(candles.length - 1, 1)) * chartW;
+  const yScale = (p: number) => PAD.top + chartH - ((p - priceMin) / priceRange) * chartH;
 
   const candleW = Math.max(1, Math.min(10, chartW / candles.length - 1));
 
-  // Find buy/sell signal candles
-  const buyIdx  = candles.reduce((best, c, i) => c.l <= data.buyZone.high  && c.l >= data.buyZone.low  ? i : best, -1);
-  const sellIdx = candles.reduce((best, c, i) => c.h >= data.sellZone.low  && c.h <= data.sellZone.high ? i : best, -1);
+  let buyIdx = -1;
+  let sellIdx = -1;
+  candles.forEach((c, i) => {
+    if (c.l <= data.buyZone.high && c.l >= data.buyZone.low) buyIdx = i;
+    if (c.h >= data.sellZone.low && c.h <= data.sellZone.high) sellIdx = i;
+  });
 
-  // Price grid lines
-  const gridPrices = Array.from({ length: 6 }, (_, i) => priceMin + (priceMax - priceMin) * (i / 5));
+  const gridPrices = Array.from({ length: 6 }, (_, i) => priceMin + priceRange * (i / 5));
 
   return (
     <div className="relative w-full overflow-x-auto">
       <svg
-        ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
         className="w-full rounded-xl"
         style={{ background: '#080C10', minWidth: 500 }}
@@ -53,35 +66,34 @@ function CandlestickChart({ data }: { data: ChartData }) {
         {/* Grid lines */}
         {gridPrices.map((p, i) => (
           <g key={i}>
-            <line x1={PAD.left} x2={W - PAD.right} y1={yScale(p)} y2={yScale(p)}
-              stroke="#1a2332" strokeWidth="1" />
+            <line x1={PAD.left} x2={W - PAD.right} y1={yScale(p)} y2={yScale(p)} stroke="#1a2332" strokeWidth="1" />
             <text x={W - PAD.right + 4} y={yScale(p) + 4} fill="#4a6080" fontSize="10" fontFamily="monospace">
               ${p.toFixed(2)}
             </text>
           </g>
         ))}
 
-        {/* Support zones */}
+        {/* Buy zone band */}
         <rect x={PAD.left} y={yScale(data.buyZone.high)} width={chartW}
           height={Math.abs(yScale(data.buyZone.low) - yScale(data.buyZone.high))}
-          fill="rgba(0,255,136,0.08)" />
+          fill="rgba(0,255,136,0.07)" />
         <line x1={PAD.left} x2={W - PAD.right} y1={yScale(data.levels.support1)} y2={yScale(data.levels.support1)}
           stroke="#00FF88" strokeWidth="1" strokeDasharray="4,3" opacity="0.6" />
         <text x={PAD.left + 4} y={yScale(data.levels.support1) - 3} fill="#00FF88" fontSize="9" fontFamily="monospace">
           S1 ${data.levels.support1}
         </text>
 
-        {/* Resistance zones */}
+        {/* Sell zone band */}
         <rect x={PAD.left} y={yScale(data.sellZone.high)} width={chartW}
           height={Math.abs(yScale(data.sellZone.low) - yScale(data.sellZone.high))}
-          fill="rgba(255,59,59,0.08)" />
+          fill="rgba(255,59,59,0.07)" />
         <line x1={PAD.left} x2={W - PAD.right} y1={yScale(data.levels.resistance1)} y2={yScale(data.levels.resistance1)}
           stroke="#FF3B3B" strokeWidth="1" strokeDasharray="4,3" opacity="0.6" />
         <text x={PAD.left + 4} y={yScale(data.levels.resistance1) - 3} fill="#FF3B3B" fontSize="9" fontFamily="monospace">
           R1 ${data.levels.resistance1}
         </text>
 
-        {/* SMA20 line */}
+        {/* SMA20 */}
         <line x1={PAD.left} x2={W - PAD.right} y1={yScale(data.sma20)} y2={yScale(data.sma20)}
           stroke="#F59E0B" strokeWidth="1" strokeDasharray="6,3" opacity="0.5" />
         <text x={PAD.left + 4} y={yScale(data.sma20) - 3} fill="#F59E0B" fontSize="9" fontFamily="monospace">
@@ -100,10 +112,8 @@ function CandlestickChart({ data }: { data: ChartData }) {
           const bodyTop = Math.min(yo, yc);
           const bodyH   = Math.max(1, Math.abs(yo - yc));
           return (
-            <g key={i} onMouseEnter={() => setTooltip({ x, y: yh, candle: c })}>
-              {/* Wick */}
+            <g key={c.t} onMouseEnter={() => setTooltip({ x, y: yh, candle: c })}>
               <line x1={x} x2={x} y1={yh} y2={yl} stroke={color} strokeWidth="1" opacity="0.7" />
-              {/* Body */}
               <rect x={x - candleW / 2} y={bodyTop} width={candleW} height={bodyH}
                 fill={bull ? 'rgba(0,255,136,0.85)' : 'rgba(255,59,59,0.85)'}
                 stroke={color} strokeWidth="0.5" rx="0.5" />
@@ -112,56 +122,54 @@ function CandlestickChart({ data }: { data: ChartData }) {
         })}
 
         {/* Buy arrow */}
-        {buyIdx >= 0 && (
-          <g>
-            <polygon
-              points={`${xScale(buyIdx)},${yScale(candles[buyIdx].l) + 22} ${xScale(buyIdx) - 8},${yScale(candles[buyIdx].l) + 38} ${xScale(buyIdx) + 8},${yScale(candles[buyIdx].l) + 38}`}
-              fill="#00FF88" opacity="0.95"
-            />
-            <text x={xScale(buyIdx)} y={yScale(candles[buyIdx].l) + 52} textAnchor="middle"
-              fill="#00FF88" fontSize="9" fontWeight="bold" fontFamily="monospace">BUY</text>
-          </g>
-        )}
+        {buyIdx >= 0 && (() => {
+          const bx = xScale(buyIdx);
+          const by = yScale(candles[buyIdx].l) + 22;
+          return (
+            <g>
+              <polygon points={`${bx},${by} ${bx - 8},${by + 16} ${bx + 8},${by + 16}`} fill="#00FF88" opacity="0.95" />
+              <text x={bx} y={by + 30} textAnchor="middle" fill="#00FF88" fontSize="9" fontWeight="bold" fontFamily="monospace">BUY</text>
+            </g>
+          );
+        })()}
 
         {/* Sell arrow */}
-        {sellIdx >= 0 && (
-          <g>
-            <polygon
-              points={`${xScale(sellIdx)},${yScale(candles[sellIdx].h) - 22} ${xScale(sellIdx) - 8},${yScale(candles[sellIdx].h) - 38} ${xScale(sellIdx) + 8},${yScale(candles[sellIdx].h) - 38}`}
-              fill="#FF3B3B" opacity="0.95"
-            />
-            <text x={xScale(sellIdx)} y={yScale(candles[sellIdx].h) - 42} textAnchor="middle"
-              fill="#FF3B3B" fontSize="9" fontWeight="bold" fontFamily="monospace">SELL</text>
-          </g>
-        )}
+        {sellIdx >= 0 && (() => {
+          const sx = xScale(sellIdx);
+          const sy = yScale(candles[sellIdx].h) - 22;
+          return (
+            <g>
+              <polygon points={`${sx},${sy} ${sx - 8},${sy - 16} ${sx + 8},${sy - 16}`} fill="#FF3B3B" opacity="0.95" />
+              <text x={sx} y={sy - 20} textAnchor="middle" fill="#FF3B3B" fontSize="9" fontWeight="bold" fontFamily="monospace">SELL</text>
+            </g>
+          );
+        })()}
 
-        {/* Current price line */}
-        <line x1={PAD.left} x2={W - PAD.right}
-          y1={yScale(data.currentPrice)} y2={yScale(data.currentPrice)}
-          stroke="#FFFFFF" strokeWidth="1" strokeDasharray="2,2" opacity="0.4" />
-        <text x={W - PAD.right + 4} y={yScale(data.currentPrice) + 4}
-          fill="#FFFFFF" fontSize="10" fontFamily="monospace" fontWeight="bold">
+        {/* Current price */}
+        <line x1={PAD.left} x2={W - PAD.right} y1={yScale(data.currentPrice)} y2={yScale(data.currentPrice)}
+          stroke="#FFFFFF" strokeWidth="1" strokeDasharray="2,2" opacity="0.35" />
+        <text x={W - PAD.right + 4} y={yScale(data.currentPrice) + 4} fill="#FFFFFF" fontSize="10" fontFamily="monospace" fontWeight="bold">
           ${data.currentPrice}
         </text>
 
         {/* Tooltip */}
         {tooltip && (
           <g>
-            <rect x={Math.min(tooltip.x + 8, W - 130)} y={Math.max(tooltip.y - 10, PAD.top)}
-              width={118} height={72} rx="4" fill="#0d1219" stroke="#1a2332" />
-            <text x={Math.min(tooltip.x + 14, W - 124)} y={Math.max(tooltip.y + 8, PAD.top + 18)}
+            <rect x={Math.min(tooltip.x + 8, W - 135)} y={Math.max(tooltip.y - 10, PAD.top)}
+              width={122} height={74} rx="4" fill="#0d1219" stroke="#1a2332" />
+            <text x={Math.min(tooltip.x + 14, W - 129)} y={Math.max(tooltip.y + 8, PAD.top + 18)}
               fill="#FFFFFF" fontSize="10" fontFamily="monospace">
               O: ${tooltip.candle.o.toFixed(2)}  H: ${tooltip.candle.h.toFixed(2)}
             </text>
-            <text x={Math.min(tooltip.x + 14, W - 124)} y={Math.max(tooltip.y + 22, PAD.top + 32)}
+            <text x={Math.min(tooltip.x + 14, W - 129)} y={Math.max(tooltip.y + 22, PAD.top + 32)}
               fill="#FFFFFF" fontSize="10" fontFamily="monospace">
               L: ${tooltip.candle.l.toFixed(2)}  C: ${tooltip.candle.c.toFixed(2)}
             </text>
-            <text x={Math.min(tooltip.x + 14, W - 124)} y={Math.max(tooltip.y + 36, PAD.top + 46)}
+            <text x={Math.min(tooltip.x + 14, W - 129)} y={Math.max(tooltip.y + 36, PAD.top + 46)}
               fill="#4a6080" fontSize="9" fontFamily="monospace">
               Vol: {(tooltip.candle.v / 1000).toFixed(0)}K
             </text>
-            <text x={Math.min(tooltip.x + 14, W - 124)} y={Math.max(tooltip.y + 50, PAD.top + 60)}
+            <text x={Math.min(tooltip.x + 14, W - 129)} y={Math.max(tooltip.y + 50, PAD.top + 60)}
               fill="#4a6080" fontSize="9" fontFamily="monospace">
               {new Date(tooltip.candle.t).toLocaleTimeString()}
             </text>
@@ -173,27 +181,33 @@ function CandlestickChart({ data }: { data: ChartData }) {
 }
 
 export default function ChartPlansPage() {
-  const [ticker, setTicker]     = useState('');
-  const [input, setInput]       = useState('');
+  const [ticker, setTicker]       = useState('');
+  const [input, setInput]         = useState('');
   const [timeframe, setTimeframe] = useState('1D');
-  const [data, setData]         = useState<ChartData | null>(null);
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
-  const [speaking, setSpeaking] = useState(false);
-  const audioRef                = useRef<HTMLAudioElement | null>(null);
-  const narratedRef             = useRef('');
+  const [data, setData]           = useState<ChartData | null>(null);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState('');
+  const [speaking, setSpeaking]   = useState(false);
+  const audioRef                  = useRef<HTMLAudioElement | null>(null);
+  const narratedRef               = useRef('');
 
   const fetchChart = useCallback(async (sym: string, tf: string) => {
     if (!sym) return;
     setLoading(true); setError(''); setData(null);
     try {
       const res = await fetch(`/api/chart/${sym}?timeframe=${tf}`, { credentials: 'include' });
-      if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
-      const d: ChartData = await res.json();
+      if (!res.ok) {
+        const e = await res.json() as { error?: string };
+        throw new Error(e.error ?? 'Failed to load chart');
+      }
+      const d = await res.json() as ChartData;
       setData(d);
       narratedRef.current = '';
-    } catch (e: any) { setError(e.message); }
-    finally { setLoading(false); }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const handleSearch = () => {
@@ -208,7 +222,6 @@ export default function ChartPlansPage() {
     if (ticker) fetchChart(ticker, tf);
   };
 
-  // Auto-narrate when data loads
   const narrate = useCallback(async (text: string) => {
     if (narratedRef.current === text) return;
     narratedRef.current = text;
@@ -217,10 +230,15 @@ export default function ChartPlansPage() {
       let voicePref = 'daniel';
       try {
         const pr = await fetch('/api/specter/params', { credentials: 'include' });
-        if (pr.ok) { const pd = await pr.json(); voicePref = pd.voice || 'daniel'; }
-      } catch {}
+        if (pr.ok) {
+          const pd = await pr.json() as { voice?: string };
+          voicePref = pd.voice ?? 'daniel';
+        }
+      } catch { /* use default */ }
       const res = await fetch('/api/specter/speak', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ text, voice: voicePref }),
       });
       if (res.ok) {
@@ -231,13 +249,17 @@ export default function ChartPlansPage() {
         audio.onended = () => { setSpeaking(false); URL.revokeObjectURL(url); };
         audio.onerror = () => setSpeaking(false);
         await audio.play();
-      } else { setSpeaking(false); }
-    } catch { setSpeaking(false); }
+      } else {
+        setSpeaking(false);
+      }
+    } catch {
+      setSpeaking(false);
+    }
   }, []);
 
   useEffect(() => {
     if (data?.narrative && narratedRef.current !== data.narrative) {
-      narrate(data.narrative);
+      void narrate(data.narrative);
     }
   }, [data, narrate]);
 
@@ -259,7 +281,6 @@ export default function ChartPlansPage() {
             </p>
           </div>
         </div>
-
         {/* Timeframe pills */}
         <div className="flex items-center gap-1">
           {TIMEFRAMES.map(tf => (
@@ -283,7 +304,7 @@ export default function ChartPlansPage() {
           <input
             value={input}
             onChange={e => setInput(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === 'Enter' && handleSearch()}
+            onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
             placeholder="Enter ticker — NVDA, AAPL, TSLA, SPY..."
             className="w-full pl-9 pr-4 py-3 rounded-lg text-sm outline-none text-white"
             style={{ background: '#0d1219', border: '1px solid #1a2332' }}
@@ -302,7 +323,8 @@ export default function ChartPlansPage() {
 
       {/* Error */}
       {error && (
-        <div className="rounded-lg px-4 py-3 text-sm" style={{ background: 'rgba(255,59,59,0.1)', border: '1px solid rgba(255,59,59,0.2)', color: '#FF3B3B' }}>
+        <div className="rounded-lg px-4 py-3 text-sm"
+          style={{ background: 'rgba(255,59,59,0.1)', border: '1px solid rgba(255,59,59,0.2)', color: '#FF3B3B' }}>
           {error}
         </div>
       )}
@@ -323,7 +345,7 @@ export default function ChartPlansPage() {
             <div className="flex items-center gap-3">
               <span className="text-2xl font-black text-white">{data.symbol}</span>
               <span className="text-xl font-bold" style={{ color: '#00FF88' }}>${data.currentPrice}</span>
-              <span className={`flex items-center gap-1 text-sm font-semibold px-2 py-0.5 rounded`}
+              <span className="flex items-center gap-1 text-sm font-semibold px-2 py-0.5 rounded"
                 style={{
                   background: data.trend === 'Bullish' ? 'rgba(0,255,136,0.12)' : 'rgba(255,59,59,0.12)',
                   color: data.trend === 'Bullish' ? '#00FF88' : '#FF3B3B',
@@ -333,7 +355,7 @@ export default function ChartPlansPage() {
                 {data.trend}
               </span>
             </div>
-            <button onClick={speaking ? stopSpeaking : () => narrate(data.narrative)}
+            <button onClick={speaking ? stopSpeaking : () => { void narrate(data.narrative); }}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
               style={{
                 background: speaking ? 'rgba(0,255,136,0.2)' : 'rgba(0,255,136,0.08)',
@@ -354,19 +376,19 @@ export default function ChartPlansPage() {
             <div className="flex items-center gap-2 mb-2">
               <div className="w-2 h-2 rounded-full" style={{ background: '#00FF88' }} />
               <span className="text-xs font-bold" style={{ color: '#00FF88' }}>SPECTER ANALYSIS</span>
-              {speaking && <span className="text-xs" style={{ color: '#4a6080' }}>Speaking...</span>}
+              {speaking && <span className="text-xs animate-pulse" style={{ color: '#4a6080' }}>Speaking...</span>}
             </div>
             <p className="text-sm leading-relaxed text-white">{data.narrative}</p>
           </div>
 
           {/* Plan cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              { label: 'Entry',     value: `$${data.plan.entry}`,  icon: ArrowUpCircle,  color: '#00FF88' },
-              { label: 'Target',    value: `$${data.plan.target}`, icon: Target,         color: '#3B82F6' },
-              { label: 'Stop Loss', value: `$${data.plan.stop}`,   icon: ShieldAlert,    color: '#FF3B3B' },
-              { label: 'Risk/Reward', value: `${data.plan.rr}:1`, icon: BarChart2,      color: '#F59E0B' },
-            ].map(({ label, value, icon: Icon, color }) => (
+            {([
+              { label: 'Entry',       value: `$${data.plan.entry}`,  Icon: ArrowUpCircle, color: '#00FF88' },
+              { label: 'Target',      value: `$${data.plan.target}`, Icon: Target,        color: '#3B82F6' },
+              { label: 'Stop Loss',   value: `$${data.plan.stop}`,   Icon: ShieldAlert,   color: '#FF3B3B' },
+              { label: 'Risk/Reward', value: `${data.plan.rr}:1`,    Icon: BarChart2,     color: '#F59E0B' },
+            ] as const).map(({ label, value, Icon, color }) => (
               <div key={label} className="rounded-xl p-4 text-center"
                 style={{ background: '#0d1219', border: '1px solid #1a2332' }}>
                 <Icon size={18} className="mx-auto mb-2" style={{ color }} />
@@ -376,24 +398,18 @@ export default function ChartPlansPage() {
             ))}
           </div>
 
-          {/* Support/Resistance table */}
-          <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #1a2332' }}>
-            <div className="px-4 py-3" style={{ background: '#080C10', borderBottom: '1px solid #1a2332' }}>
-              <span className="text-xs font-bold" style={{ color: '#4a6080' }}>KEY LEVELS</span>
-            </div>
-            <div className="grid grid-cols-2 divide-x" style={{ borderColor: '#1a2332' }}>
-              {[
-                { label: 'Buy Zone', low: data.buyZone.low,  high: data.buyZone.high,  color: '#00FF88' },
-                { label: 'Sell Zone', low: data.sellZone.low, high: data.sellZone.high, color: '#FF3B3B' },
-              ].map(({ label, low, high, color }) => (
-                <div key={label} className="px-4 py-3" style={{ background: '#0d1219' }}>
-                  <div className="text-xs mb-1" style={{ color: '#4a6080' }}>{label}</div>
-                  <div className="text-sm font-bold" style={{ color }}>
-                    ${low} – ${high}
-                  </div>
-                </div>
-              ))}
-            </div>
+          {/* Key levels */}
+          <div className="grid grid-cols-2 gap-3">
+            {([
+              { label: 'Buy Zone',  low: data.buyZone.low,   high: data.buyZone.high,   color: '#00FF88' },
+              { label: 'Sell Zone', low: data.sellZone.low,  high: data.sellZone.high,  color: '#FF3B3B' },
+            ] as const).map(({ label, low, high, color }) => (
+              <div key={label} className="rounded-xl px-4 py-3"
+                style={{ background: '#0d1219', border: '1px solid #1a2332' }}>
+                <div className="text-xs mb-1" style={{ color: '#4a6080' }}>{label}</div>
+                <div className="text-sm font-bold" style={{ color }}>${low} – ${high}</div>
+              </div>
+            ))}
           </div>
         </>
       )}
@@ -402,7 +418,9 @@ export default function ChartPlansPage() {
       {!data && !loading && !error && (
         <div className="flex flex-col items-center justify-center py-24 gap-4">
           <BarChart2 size={40} style={{ color: '#1a2332' }} />
-          <p className="text-sm" style={{ color: '#4a6080' }}>Enter a ticker above and Specter will map out your trade plan</p>
+          <p className="text-sm" style={{ color: '#4a6080' }}>
+            Enter a ticker above and Specter will map out your trade plan
+          </p>
         </div>
       )}
     </div>
