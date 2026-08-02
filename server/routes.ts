@@ -1244,6 +1244,129 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     }
   });
 
+
+  // ── Chart Plans ─────────────────────────────────────────────────────────────
+  // GET /api/chart/:symbol?timeframe=1D|1W|1M|3M
+  // Returns OHLCV candles + Specter AI analysis (support/resistance, buy/sell zones, plan)
+  app.get('/api/chart/:symbol', async (req, res) => {
+    const symbol = (req.params.symbol || '').toUpperCase().trim();
+    const timeframe = (req.query.timeframe as string) || '1D';
+    const POLY_KEY = process.env.POLYGON_API_KEY;
+
+    if (!symbol) return res.status(400).json({ error: 'Symbol required' });
+
+    // Map timeframe to Polygon params
+    const tfMap: Record<string, { multiplier: number; timespan: string; days: number }> = {
+      '1D': { multiplier: 5,  timespan: 'minute', days: 1  },
+      '1W': { multiplier: 1,  timespan: 'hour',   days: 7  },
+      '1M': { multiplier: 1,  timespan: 'day',    days: 30 },
+      '3M': { multiplier: 1,  timespan: 'day',    days: 90 },
+    };
+    const tf = tfMap[timeframe] || tfMap['1D'];
+    const now = new Date();
+    const from = new Date(now.getTime() - tf.days * 24 * 60 * 60 * 1000);
+    const fromStr = from.toISOString().split('T')[0];
+    const toStr = now.toISOString().split('T')[0];
+
+    try {
+      // Fetch candle data from Polygon
+      const polyUrl = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/${tf.multiplier}/${tf.timespan}/${fromStr}/${toStr}?adjusted=true&sort=asc&limit=500&apiKey=${POLY_KEY}`;
+      const polyRes = await fetch(polyUrl);
+      const polyData = await polyRes.json() as any;
+
+      if (!polyData.results || polyData.results.length === 0) {
+        return res.status(404).json({ error: `No candle data found for ${symbol}` });
+      }
+
+      const candles = polyData.results.map((c: any) => ({
+        t: c.t, // timestamp ms
+        o: c.o, // open
+        h: c.h, // high
+        l: c.l, // low
+        c: c.c, // close
+        v: c.v, // volume
+      }));
+
+      // Calculate key levels
+      const closes = candles.map((c: any) => c.c);
+      const highs  = candles.map((c: any) => c.h);
+      const lows   = candles.map((c: any) => c.l);
+      const currentPrice = closes[closes.length - 1];
+      const recentHigh   = Math.max(...highs.slice(-Math.min(20, highs.length)));
+      const recentLow    = Math.min(...lows.slice(-Math.min(20, lows.length)));
+      const range        = recentHigh - recentLow;
+
+      // Simple support/resistance: pivot points from recent candles
+      const resistance1 = +(recentHigh * 0.998).toFixed(2);
+      const resistance2 = +(recentHigh * 1.015).toFixed(2);
+      const support1    = +(recentLow  * 1.002).toFixed(2);
+      const support2    = +(recentLow  * 0.985).toFixed(2);
+
+      // Buy zone: near support1, Sell zone: near resistance1
+      const buyZoneLow   = +(support1  * 0.998).toFixed(2);
+      const buyZoneHigh  = +(support1  * 1.008).toFixed(2);
+      const sellZoneLow  = +(resistance1 * 0.992).toFixed(2);
+      const sellZoneHigh = +(resistance1 * 1.002).toFixed(2);
+
+      // Entry / target / stop
+      const entry  = +(buyZoneHigh).toFixed(2);
+      const target = +(sellZoneLow).toFixed(2);
+      const stop   = +(buyZoneLow  * 0.99).toFixed(2);
+      const rr     = +((target - entry) / (entry - stop)).toFixed(1);
+
+      // Trend: simple — last close vs 20-period SMA
+      const sma20 = closes.length >= 20
+        ? +(closes.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20).toFixed(2)
+        : +(closes.reduce((a: number, b: number) => a + b, 0) / closes.length).toFixed(2);
+      const trend = currentPrice > sma20 ? 'Bullish' : 'Bearish';
+
+      // AI narrative via OpenAI
+      const openaiKey = process.env.OPENAI_API_KEY;
+      let narrative = '';
+      if (openaiKey) {
+        try {
+          const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': \`Bearer \${openaiKey}\`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              max_tokens: 200,
+              messages: [{
+                role: 'system',
+                content: 'You are Specter, an elite AI trading analyst. Give a sharp 3-sentence chart plan. Mention the ticker, trend, buy zone, target, and stop. Sound like a confident professional advisor, not a robot.',
+              }, {
+                role: 'user',
+                content: \`Ticker: \${symbol}. Timeframe: \${timeframe}. Current price: \$\${currentPrice}. Trend: \${trend} (price \${currentPrice > sma20 ? 'above' : 'below'} 20-period SMA of \$\${sma20}). Support: \$\${support1}. Resistance: \$\${resistance1}. Buy zone: \$\${buyZoneLow}–\$\${buyZoneHigh}. Target: \$\${target}. Stop loss: \$\${stop}. Risk/reward: \${rr}:1.\`,
+              }],
+            }),
+          });
+          const aiData = await aiRes.json() as any;
+          narrative = aiData.choices?.[0]?.message?.content?.trim() || '';
+        } catch {}
+      }
+
+      if (!narrative) {
+        narrative = \`\${symbol} is trading at \$\${currentPrice} with a \${trend.toLowerCase()} bias. The optimal buy zone is between \$\${buyZoneLow} and \$\${buyZoneHigh} near key support. Target is \$\${target} at resistance with a stop loss at \$\${stop}, giving a \${rr}-to-1 risk/reward ratio.\`;
+      }
+
+      res.json({
+        symbol,
+        timeframe,
+        currentPrice,
+        trend,
+        sma20,
+        candles,
+        levels: { support1, support2, resistance1, resistance2 },
+        buyZone:  { low: buyZoneLow,  high: buyZoneHigh },
+        sellZone: { low: sellZoneLow, high: sellZoneHigh },
+        plan: { entry, target, stop, rr },
+        narrative,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Chart data fetch failed', detail: err.message });
+    }
+  });
+
   // ── Watchlist Monitor (runs every 15 min, fires push on unusual moves) ──────
   const watchlistAlertCooldown = new Map<string, number>(); // key: userId-symbol
 
