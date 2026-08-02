@@ -74,7 +74,7 @@ export function SpecterPanel() {
       const savedParams = (() => {
         try { return JSON.parse(localStorage.getItem('specterParams') || '{}'); } catch { return {}; }
       })();
-      const voicePref = savedParams.voice || 'antoni';
+      const voicePref = savedParams.voice || 'daniel';
 
       const res = await fetch('/api/specter/speak', {
         method: 'POST',
