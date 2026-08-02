@@ -1048,6 +1048,8 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
   // ── Specter Voice: ElevenLabs (user-selectable) ────────────────────────────
   const ELEVEN_VOICES: Record<string, string> = {
     daniel: 'onwK4e9ZLuTAKqWW03F9',  // Male   — British, authoritative, Jarvis-style
+    josh:   'TxGEqnHWrfWFTfGW9XjX',  // Male   — deep, confident American
+    arnold: 'VR6AewLTigWG4xSOukaG',  // Male   — strong, commanding
     adam:   'pNInz6obpgDQGcFmaJgB',  // Male   — deep, calm
     antoni: 'ErXwobaYiN019PkySvjV',  // Male   — warm, confident
     rachel: '21m00Tcm4TlvDq8ikWAM',  // Female — clear, professional
