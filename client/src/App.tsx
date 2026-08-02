@@ -19,6 +19,7 @@ import DashboardPage from '@/pages/dashboard';
 import BullishScannerPage from '@/pages/bullish-scanner';
 import BearishScannerPage from '@/pages/bearish-scanner';
 import WatchlistPage from '@/pages/watchlist';
+import ChartPlansPage from '@/pages/chart-plans';
 import BriefingPage from '@/pages/briefing';
 import PricingPage from '@/pages/pricing';
 import AlertsPage from '@/pages/alerts';
@@ -36,6 +37,7 @@ function AppRouter() {
       <Route path="/bullish" component={BullishScannerPage} />
       <Route path="/bearish" component={BearishScannerPage} />
       <Route path="/watchlist" component={WatchlistPage} />
+      <Route path="/charts" component={ChartPlansPage} />
       <Route path="/briefing" component={BriefingPage} />
       <Route path="/pricing" component={PricingPage} />
       <Route path="/alerts" component={AlertsPage} />
