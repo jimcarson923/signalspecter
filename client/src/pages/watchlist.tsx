@@ -97,8 +97,12 @@ export default function WatchlistPage() {
       const data = await res.json();
       if (data.text) {
         // Speak via ElevenLabs
-        const savedParams = (() => { try { return JSON.parse(localStorage.getItem('specterParams') || '{}'); } catch { return {}; } })();
-        const voicePref = savedParams.voice || 'adam';
+        // Always fetch voice from server so user's saved preference is used
+        let voicePref = 'daniel';
+        try {
+          const paramsRes = await fetch('/api/specter/params', { credentials: 'include' });
+          if (paramsRes.ok) { const pd = await paramsRes.json(); voicePref = pd.voice || 'daniel'; }
+        } catch { voicePref = 'daniel'; }
         const audioRes = await fetch('/api/specter/speak', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
