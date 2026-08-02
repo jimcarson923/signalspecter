@@ -1141,6 +1141,189 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
   });
 
 
+  // ── Paper Trading ─────────────────────────────────────────────────────────────
+
+  // GET /api/paper/portfolio — get account + positions + live prices
+  app.get('/api/paper/portfolio', async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const userId = req.session.userId;
+    const acct = storage.getPaperAccount(userId);
+    if (!acct) return res.json({ hasAccount: false });
+
+    const positions = storage.getPaperPositions(userId);
+    const trades    = storage.getPaperTrades(userId);
+
+    // Fetch live prices for all open positions
+    let enriched: Array<{ symbol: string; shares: number; avgCost: number; currentPrice: number; value: number; pnl: number; pnlPct: number; id: number }> = [];
+    if (positions.length > 0) {
+      const syms   = positions.map(p => p.symbol);
+      const snaps  = await getSnapshots(syms);
+      const priceMap: Record<string, number> = {};
+      for (const s of snaps) {
+        priceMap[s.ticker] = s.day?.c || s.prevDay?.c || 0;
+      }
+      enriched = positions.map(p => {
+        const cur  = priceMap[p.symbol] || p.avgCost;
+        const val  = cur * p.shares;
+        const pnl  = (cur - p.avgCost) * p.shares;
+        const pct  = ((cur - p.avgCost) / p.avgCost) * 100;
+        return { id: p.id, symbol: p.symbol, shares: p.shares, avgCost: p.avgCost, currentPrice: cur, value: val, pnl, pnlPct: +pct.toFixed(2) };
+      });
+    }
+
+    const positionsValue = enriched.reduce((s, p) => s + p.value, 0);
+    const totalPnl       = enriched.reduce((s, p) => s + p.pnl,   0);
+    const totalValue     = acct.cash + positionsValue;
+    const totalReturn    = totalValue - acct.startingCash;
+    const totalReturnPct = (totalReturn / acct.startingCash) * 100;
+
+    res.json({
+      hasAccount: true,
+      account: { ...acct, totalValue, totalReturn: +totalReturn.toFixed(2), totalReturnPct: +totalReturnPct.toFixed(2) },
+      positions: enriched,
+      trades: trades.slice(-50).reverse(),
+    });
+  });
+
+  // POST /api/paper/create — create paper account with custom starting cash
+  app.post('/api/paper/create', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const userId = req.session.userId;
+    const existing = storage.getPaperAccount(userId);
+    if (existing) return res.status(400).json({ error: 'Account already exists' });
+    const startingCash = Math.max(1000, Math.min(10000000, Number(req.body.startingCash) || 10000));
+    const acct = storage.createPaperAccount(userId, startingCash);
+    res.json({ ok: true, account: acct });
+  });
+
+  // POST /api/paper/precheck — Specter pre-trade coaching before buy
+  app.post('/api/paper/precheck', async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { symbol, shares, price } = req.body as { symbol: string; shares: number; price: number };
+    if (!symbol || !shares || !price) return res.status(400).json({ error: 'Missing fields' });
+
+    const total = shares * price;
+    const openaiKey = process.env.OPENAI_API_KEY;
+    let verdict = '';
+    if (openaiKey) {
+      try {
+        const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + openaiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini', max_tokens: 120,
+            messages: [
+              { role: 'system', content: 'You are Specter, elite AI trading analyst. Give a sharp 2-sentence pre-trade verdict. Should the trader take this paper trade? Mention risk, momentum, and a quick buy/pass recommendation. Be direct and confident.' },
+              { role: 'user',   content: 'Paper trade: Buy ' + shares + ' shares of ' + symbol + ' at $' + price + ' (total $' + total.toFixed(2) + '). Quick verdict?' },
+            ],
+          }),
+        });
+        const aiData = await aiRes.json() as { choices?: Array<{ message?: { content?: string } }> };
+        verdict = aiData.choices?.[0]?.message?.content?.trim() ?? '';
+      } catch { verdict = ''; }
+    }
+    if (!verdict) verdict = 'Buying ' + shares + ' shares of ' + symbol + ' at $' + price + ' for a total of $' + total.toFixed(2) + '. Make sure this fits within your risk tolerance before proceeding.';
+    res.json({ verdict });
+  });
+
+  // POST /api/paper/buy — execute paper buy
+  app.post('/api/paper/buy', async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const userId = req.session.userId;
+    const { symbol, shares } = req.body as { symbol: string; shares: number };
+    if (!symbol || !shares || shares <= 0) return res.status(400).json({ error: 'Invalid trade' });
+
+    const acct = storage.getPaperAccount(userId);
+    if (!acct) return res.status(400).json({ error: 'No paper account — create one first' });
+
+    // Get live price
+    const snaps = await getSnapshots([symbol.toUpperCase()]);
+    const price = snaps[0]?.day?.c || snaps[0]?.prevDay?.c || 0;
+    if (!price) return res.status(400).json({ error: 'Could not get price for ' + symbol });
+
+    const total = price * shares;
+    if (total > acct.cash) return res.status(400).json({ error: 'Insufficient cash — have $' + acct.cash.toFixed(2) + ', need $' + total.toFixed(2) });
+
+    // Update or create position
+    const existing = storage.getPaperPosition(userId, symbol.toUpperCase());
+    if (existing) {
+      const newShares  = existing.shares + shares;
+      const newAvgCost = ((existing.avgCost * existing.shares) + (price * shares)) / newShares;
+      storage.updatePaperPosition(existing.id, newShares, +newAvgCost.toFixed(4));
+    } else {
+      storage.addPaperPosition({ userId, symbol: symbol.toUpperCase(), shares, avgCost: price });
+    }
+
+    storage.updatePaperCash(userId, acct.cash - total);
+    storage.addPaperTrade({ userId, symbol: symbol.toUpperCase(), action: 'buy', shares, price, total, pnl: null, pnlPct: null, coaching: null });
+    res.json({ ok: true, price, total: +total.toFixed(2), remainingCash: +(acct.cash - total).toFixed(2) });
+  });
+
+  // POST /api/paper/sell — execute paper sell + Specter post-trade coaching
+  app.post('/api/paper/sell', async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    const userId = req.session.userId;
+    const { symbol, shares } = req.body as { symbol: string; shares: number };
+    if (!symbol || !shares || shares <= 0) return res.status(400).json({ error: 'Invalid trade' });
+
+    const acct = storage.getPaperAccount(userId);
+    if (!acct) return res.status(400).json({ error: 'No paper account' });
+
+    const position = storage.getPaperPosition(userId, symbol.toUpperCase());
+    if (!position) return res.status(400).json({ error: 'No position in ' + symbol });
+    if (shares > position.shares) return res.status(400).json({ error: 'You only have ' + position.shares + ' shares' });
+
+    // Get live price
+    const snaps = await getSnapshots([symbol.toUpperCase()]);
+    const price = snaps[0]?.day?.c || snaps[0]?.prevDay?.c || position.avgCost;
+
+    const total   = price * shares;
+    const pnl     = (price - position.avgCost) * shares;
+    const pnlPct  = ((price - position.avgCost) / position.avgCost) * 100;
+
+    // Post-trade coaching from Specter
+    const openaiKey = process.env.OPENAI_API_KEY;
+    let coaching = '';
+    if (openaiKey) {
+      try {
+        const outcome = pnl >= 0 ? 'WIN' : 'LOSS';
+        const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + openaiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini', max_tokens: 120,
+            messages: [
+              { role: 'system', content: 'You are Specter, elite AI trading coach. Give a sharp 2-sentence post-trade review. What did the trader do right or wrong? What should they do differently next time? Be honest and direct.' },
+              { role: 'user',   content: outcome + ': Sold ' + shares + ' shares of ' + symbol + ' at $' + price.toFixed(2) + '. Bought at $' + position.avgCost.toFixed(2) + '. P&L: $' + pnl.toFixed(2) + ' (' + pnlPct.toFixed(1) + '%). Coach them.' },
+            ],
+          }),
+        });
+        const aiData = await aiRes.json() as { choices?: Array<{ message?: { content?: string } }> };
+        coaching = aiData.choices?.[0]?.message?.content?.trim() ?? '';
+      } catch { coaching = ''; }
+    }
+    if (!coaching) coaching = (pnl >= 0 ? 'Good trade on ' : 'Tough loss on ') + symbol + '. ' + (pnl >= 0 ? 'Lock in those gains and look for the next setup.' : 'Review your entry and tighten your stops next time.');
+
+    // Update position or remove if fully sold
+    if (shares === position.shares) {
+      storage.deletePaperPosition(position.id);
+    } else {
+      storage.updatePaperPosition(position.id, position.shares - shares, position.avgCost);
+    }
+
+    storage.updatePaperCash(userId, acct.cash + total);
+    const trade = storage.addPaperTrade({ userId, symbol: symbol.toUpperCase(), action: 'sell', shares, price, total: +total.toFixed(2), pnl: +pnl.toFixed(2), pnlPct: +pnlPct.toFixed(2), coaching });
+    res.json({ ok: true, price, total: +total.toFixed(2), pnl: +pnl.toFixed(2), pnlPct: +pnlPct.toFixed(2), coaching, tradeId: trade.id });
+  });
+
+  // POST /api/paper/reset — reset account back to starting cash
+  app.post('/api/paper/reset', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    storage.resetPaperAccount(req.session.userId);
+    res.json({ ok: true });
+  });
+
+
   // ── Chart Plans ─────────────────────────────────────────────────────────────
   app.get('/api/chart/:symbol', async (req, res) => {
     const symbol = (req.params.symbol || '').toUpperCase().trim();
