@@ -70,11 +70,15 @@ export function SpecterPanel() {
     }
 
     try {
-      // Use ElevenLabs TTS — load voice preference from saved params
-      const savedParams = (() => {
-        try { return JSON.parse(localStorage.getItem('specterParams') || '{}'); } catch { return {}; }
-      })();
-      const voicePref = savedParams.voice || 'daniel';
+      // Use ElevenLabs TTS — always fetch voice from server (never stale localStorage)
+      let voicePref = 'daniel';
+      try {
+        const paramsRes = await fetch('/api/specter/params', { credentials: 'include' });
+        if (paramsRes.ok) {
+          const paramsData = await paramsRes.json();
+          voicePref = paramsData.voice || 'daniel';
+        }
+      } catch { voicePref = 'daniel'; }
 
       const res = await fetch('/api/specter/speak', {
         method: 'POST',
