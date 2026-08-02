@@ -1047,7 +1047,8 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
 
   // ── Specter Voice: ElevenLabs (user-selectable) ────────────────────────────
   const ELEVEN_VOICES: Record<string, string> = {
-    adam:   'pNInz6obpgDQGcFmaJgB',  // Male   — deep, calm, Jarvis-style
+    daniel: 'onwK4e9ZLuTAKqWW03F9',  // Male   — British, authoritative, Jarvis-style
+    adam:   'pNInz6obpgDQGcFmaJgB',  // Male   — deep, calm
     antoni: 'ErXwobaYiN019PkySvjV',  // Male   — warm, confident
     rachel: '21m00Tcm4TlvDq8ikWAM',  // Female — clear, professional
     domi:   'AZnzlk1XvdvUeBnXmlld',  // Female — strong, expressive
@@ -1058,7 +1059,7 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
     if (!text) return res.status(400).json({ error: 'No text provided' });
 
     const ELEVEN_API_KEY = process.env.ELEVENLABS_API_KEY;
-    const voiceId = ELEVEN_VOICES[voicePref as string] ?? ELEVEN_VOICES['antoni'];
+    const voiceId = ELEVEN_VOICES[voicePref as string] ?? ELEVEN_VOICES['daniel'];
 
     // Try ElevenLabs first (best quality — Jarvis feel)
     if (ELEVEN_API_KEY) {
