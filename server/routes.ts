@@ -487,15 +487,15 @@ export async function registerRoutes(httpServer: ReturnType<typeof createServer>
   // Save user parameters
   app.post('/api/specter/params', (req, res) => {
     if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
-    const { minPrice = 0, maxPrice = 999999, minScore = 0, sector = 'All', minVolume = 0 } = req.body;
-    specterParams[req.session.userId] = { minPrice, maxPrice, minScore, sector, minVolume };
+    const { minPrice = 0, maxPrice = 999999, minScore = 0, sector = 'All', minVolume = 0, voice = 'daniel' } = req.body;
+    specterParams[req.session.userId] = { minPrice, maxPrice, minScore, sector, minVolume, voice };
     res.json({ ok: true });
   });
 
   // Get user parameters
   app.get('/api/specter/params', (req, res) => {
     if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
-    const params = specterParams[req.session.userId] ?? { minPrice: 0, maxPrice: 1000, minScore: 50, sector: 'All', minVolume: 0 };
+    const params = specterParams[req.session.userId] ?? { minPrice: 0, maxPrice: 1000, minScore: 50, sector: 'All', minVolume: 0, voice: 'daniel' };
     res.json(params);
   });
 
