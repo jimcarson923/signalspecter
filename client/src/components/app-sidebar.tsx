@@ -1,4 +1,4 @@
-import {
+import { BarChart2,
   LayoutDashboard, TrendingUp, TrendingDown, BookMarked,
   Brain, DollarSign, Bell, Settings, FileText, ChevronRight,
   SlidersHorizontal
@@ -10,6 +10,7 @@ const navItems = [
   { icon: TrendingDown,      label: 'Bearish Scanner',     href: '/bearish' },
   { icon: SlidersHorizontal, label: 'Price Range',         href: '/price-range' },
   { icon: BookMarked,        label: 'Watchlist',           href: '/watchlist' },
+  { icon: BarChart2,         label: 'Chart Plans',         href: '/charts' },
   { icon: Brain,             label: 'AI Briefing',         href: '/briefing' },
   { icon: Bell,              label: 'Alerts',              href: '/alerts' },
   { icon: FileText,          label: 'Reports',             href: '/reports' },
